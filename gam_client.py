@@ -236,6 +236,58 @@ class GAMClient:
         return pd.DataFrame(rows)
 
     # ------------------------------------------------------------------
+    # Lifetime delivery (for pacing)
+    # ------------------------------------------------------------------
+
+    def run_lifetime_delivery(self) -> pd.DataFrame:
+        """
+        Fetch lifetime cumulative impressions per line item.
+        Used for pacing so we compare total-delivered vs total-goal,
+        not just the rolling 7-day window.
+        """
+        report_service = self._report_service()
+
+        report_job = {
+            "reportQuery": {
+                "dimensions": ["LINE_ITEM_ID"],
+                "columns": ["AD_SERVER_IMPRESSIONS"],
+                "dateRangeType": "LIFETIME",
+                "reportCurrency": "USD",
+            }
+        }
+
+        report_job_result = report_service.runReportJob(report_job)
+        job_id = report_job_result["id"]
+        logger.info("GAM lifetime report job submitted, id=%s", job_id)
+
+        status   = "IN_PROGRESS"
+        deadline = time.time() + 600
+        while status == "IN_PROGRESS":
+            if time.time() > deadline:
+                raise RuntimeError(f"GAM lifetime report job {job_id} timed out")
+            time.sleep(10)
+            status = report_service.getReportJobStatus(job_id)
+            logger.info("GAM lifetime report job %s status: %s", job_id, status)
+
+        if status != "COMPLETED":
+            raise RuntimeError(f"GAM lifetime report job {job_id} ended with status {status!r}")
+
+        url = report_service.getReportDownloadURL(job_id, "CSV_DUMP")
+        import urllib.request
+        with urllib.request.urlopen(url) as resp:
+            raw = resp.read()
+
+        if raw[:2] == b"\x1f\x8b":
+            import gzip
+            raw = gzip.decompress(raw)
+
+        df = pd.read_csv(io.BytesIO(raw))
+        df.columns = [_snake(re.sub(r"^(?:Dimension|Column)\.", "", col)) for col in df.columns]
+        df["line_item_id"] = df["line_item_id"].astype(str)
+        df = df.rename(columns={"ad_server_impressions": "lifetime_impressions_delivered"})
+        return df[["line_item_id", "lifetime_impressions_delivered"]]
+
+    # ------------------------------------------------------------------
     # Combined pacing report
     # ------------------------------------------------------------------
 
@@ -252,9 +304,9 @@ class GAMClient:
         """
         df_delivery = self.run_delivery_report(start_date, end_date)
         df_items = self.get_active_line_items()
+        df_lifetime = self.run_lifetime_delivery()
 
-        # Aggregate delivery per line item across all dates in range
-        # (keep date-level rows; pacing is computed per line item overall)
+        # Aggregate 7-day delivery per line item (for trend metrics)
         agg_spec = {
             "impressions_delivered": ("ad_server_impressions", "sum"),
             "ad_server_clicks": ("ad_server_clicks", "sum"),
@@ -277,6 +329,7 @@ class GAMClient:
         df_items["line_item_id"] = df_items["line_item_id"].astype(str)
 
         merged = df_items.merge(agg, on="line_item_id", how="left")
+        merged = merged.merge(df_lifetime, on="line_item_id", how="left")
 
         # VCR — only computable when video columns were present in the report
         if "video_starts" in merged.columns and "video_completions" in merged.columns:
@@ -289,14 +342,14 @@ class GAMClient:
         else:
             merged["vcr"] = None
 
-        # Pacing
+        # Pacing — uses lifetime impressions, not the rolling 7-day window
         today = date.today()
 
         def _pacing(row) -> Optional[float]:
             try:
-                goal = row["impressions_goal"]
-                delivered = row["impressions_delivered"]
-                has_goal = goal and goal > 0 and pd.notna(delivered)
+                goal      = row["impressions_goal"]
+                delivered = row["lifetime_impressions_delivered"]
+                has_goal  = goal and goal > 0 and pd.notna(delivered)
 
                 raw_start = pd.to_datetime(row["start_date"])
                 raw_end   = pd.to_datetime(row["end_date"])

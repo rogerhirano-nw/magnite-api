@@ -626,7 +626,7 @@ with tab_seller:
             if datecol in gam_df.columns:
                 gam_df[datecol] = pd.to_datetime(gam_df[datecol], errors="coerce").dt.date
 
-        for numcol in ("pacing_pct", "impressions_delivered", "impressions_goal", "cpm_rate",
+        for numcol in ("pacing_pct", "impressions_delivered", "lifetime_impressions_delivered", "impressions_goal", "cpm_rate",
                        "ad_server_cpm_and_cpc_revenue", "ad_server_ctr",
                        "ad_server_active_view_viewable_impressions_rate", "vcr"):
             if numcol in gam_df.columns:
@@ -697,7 +697,7 @@ with tab_seller:
             st.info("No campaigns found for the selected seller.")
         else:
             # ---------- Summary metrics ----------
-            total_impr = view_gam["impressions_delivered"].sum() if "impressions_delivered" in view_gam else 0
+            total_impr = view_gam["lifetime_impressions_delivered"].sum() if "lifetime_impressions_delivered" in view_gam else 0
             total_rev  = view_gam["ad_server_cpm_and_cpc_revenue"].sum() if "ad_server_cpm_and_cpc_revenue" in view_gam else 0
             avg_pacing = view_gam["pacing_pct"].mean() if "pacing_pct" in view_gam else None
             avg_viewability = (
@@ -739,11 +739,11 @@ with tab_seller:
 
             # ---------- Campaign table ----------
             # Remaining impressions (None when no goal is set)
-            if "impressions_goal" in view_gam.columns and "impressions_delivered" in view_gam.columns:
+            if "impressions_goal" in view_gam.columns and "lifetime_impressions_delivered" in view_gam.columns:
                 view_gam = view_gam.copy()
                 view_gam["remaining_impressions"] = view_gam.apply(
-                    lambda r: max(r["impressions_goal"] - r["impressions_delivered"], 0)
-                    if pd.notna(r["impressions_goal"]) and pd.notna(r["impressions_delivered"])
+                    lambda r: max(r["impressions_goal"] - r["lifetime_impressions_delivered"], 0)
+                    if pd.notna(r["impressions_goal"]) and pd.notna(r["lifetime_impressions_delivered"])
                     else None,
                     axis=1,
                 )
@@ -764,7 +764,7 @@ with tab_seller:
                 "ad_format": "Format",
                 "impressions_goal": "Goal",
                 "cpm_rate": "CPM Rate",
-                "impressions_delivered": "Delivered",
+                "lifetime_impressions_delivered": "Delivered",
                 "remaining_impressions": "Remaining",
                 "pacing_pct": "Pacing %",
                 "ad_server_active_view_viewable_impressions_rate": "Viewability %",
