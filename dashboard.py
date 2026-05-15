@@ -626,6 +626,12 @@ with tab_seller:
             if datecol in gam_df.columns:
                 gam_df[datecol] = pd.to_datetime(gam_df[datecol], errors="coerce").dt.date
 
+        for numcol in ("pacing_pct", "impressions_delivered", "impressions_goal", "cpm_rate",
+                       "ad_server_cpm_and_cpc_revenue", "ad_server_ctr",
+                       "ad_server_active_view_viewable_impressions_rate", "vcr"):
+            if numcol in gam_df.columns:
+                gam_df[numcol] = pd.to_numeric(gam_df[numcol], errors="coerce")
+
         # Extract seller from order_name
         gam_df["seller_ae"] = (
             gam_df["order_name"]
