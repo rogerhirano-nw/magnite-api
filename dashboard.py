@@ -861,7 +861,13 @@ with tab_seller:
             lambda d: _parse_deal(d)["deal_type_label"]
         )
 
-        _pf1, _pf2 = st.columns(2)
+        try:
+            _mag_dsps = list(load("by_deal_daily")["partner"].dropna().unique())
+        except Exception:
+            _mag_dsps = []
+        _dsp_opts = sorted(set(list(pmp_df["dsp"].dropna().unique()) + _mag_dsps))
+
+        _pf1, _pf2, _pf3 = st.columns(3)
         with _pf1:
             sel_pmp_deal_types = st.multiselect(
                 "Deal Type",
@@ -873,6 +879,12 @@ with tab_seller:
                 "SSP",
                 ["GAM", "Magnite", "Pubmatic"],
                 key="campaigns_pmp_ssp_filter",
+            )
+        with _pf3:
+            sel_pmp_dsps = st.multiselect(
+                "DSP",
+                _dsp_opts,
+                key="campaigns_pmp_dsp_filter",
             )
         if sel_pmp_deal_types:
             pmp_df = pmp_df[pmp_df["deal_type_label"].isin(sel_pmp_deal_types)]
@@ -905,10 +917,11 @@ with tab_seller:
             })
         )
 
-        # Add GAM PG deals (Programmatic Guaranteed managed in Google Ad Manager)
-        _gam_pg_summary = pd.DataFrame()
-        _include_pg = not sel_pmp_deal_types or "Programmatic Guaranteed" in sel_pmp_deal_types
-        if _include_pg:
+        # Add GAM PA / PD / PG deals (all managed in Google Ad Manager)
+        _gam_summary = pd.DataFrame()
+        _gam_deal_types = [t for t in (sel_pmp_deal_types or ["Private Auction", "Preferred Deal", "Programmatic Guaranteed"])
+                           if t in ("Private Auction", "Preferred Deal", "Programmatic Guaranteed")]
+        if _gam_deal_types:
             try:
                 _gam_raw = load("campaigns_gam").copy()
                 if not _gam_raw.empty and "order_name" in _gam_raw.columns:
@@ -916,22 +929,22 @@ with tab_seller:
                     _gam_raw["deal_type_label"] = _gam_raw["order_name"].apply(
                         lambda d: _parse_deal(d)["deal_type_label"]
                     )
-                    _pg = _gam_raw[_gam_raw["deal_type_label"] == "Programmatic Guaranteed"].copy()
-                    if not _pg.empty:
-                        _pg["ssp"] = "GAM"
-                        _pg["seller_ae"] = (
-                            _pg["order_name"]
+                    _gam_deals = _gam_raw[_gam_raw["deal_type_label"].isin(_gam_deal_types)].copy()
+                    if not _gam_deals.empty:
+                        _gam_deals["ssp"] = "GAM"
+                        _gam_deals["seller_ae"] = (
+                            _gam_deals["order_name"]
                             .str.extract(r"Team-(?:USA|INTL)_([A-Za-z]+)", expand=False)
                             .map(AE_NAMES)
                         )
                         if selected_seller != "All":
-                            _pg = _pg[_pg["seller_ae"] == selected_seller]
+                            _gam_deals = _gam_deals[_gam_deals["seller_ae"] == selected_seller]
                         for _col in ("lifetime_impressions_delivered", "ad_server_cpm_and_cpc_revenue", "cpm_rate"):
-                            if _col in _pg.columns:
-                                _pg[_col] = pd.to_numeric(_pg[_col], errors="coerce")
-                        if not _pg.empty:
-                            _pg_agg = (
-                                _pg.groupby(["ssp", "order_name", "seller_ae"], dropna=False)
+                            if _col in _gam_deals.columns:
+                                _gam_deals[_col] = pd.to_numeric(_gam_deals[_col], errors="coerce")
+                        if not _gam_deals.empty:
+                            _gam_agg = (
+                                _gam_deals.groupby(["ssp", "order_name", "deal_type_label", "seller_ae"], dropna=False)
                                 .agg(
                                     paid_impressions=("lifetime_impressions_delivered", "sum"),
                                     revenue=("ad_server_cpm_and_cpc_revenue", "sum"),
@@ -939,15 +952,15 @@ with tab_seller:
                                 )
                                 .reset_index()
                             )
-                            _pg_agg["Deal Type"] = "Programmatic Guaranteed"
-                            _pg_agg["DSP"] = None
-                            _pg_agg["Win Rate %"] = None
-                            _pg_agg["Total Requests"] = None
-                            _pg_agg["Bid Responses"] = None
-                            _gam_pg_summary = _pg_agg.rename(columns={
+                            _gam_agg["DSP"] = None
+                            _gam_agg["Win Rate %"] = None
+                            _gam_agg["Total Requests"] = None
+                            _gam_agg["Bid Responses"] = None
+                            _gam_summary = _gam_agg.rename(columns={
                                 "ssp": "SSP",
                                 "seller_ae": "Seller",
                                 "order_name": "Deal",
+                                "deal_type_label": "Deal Type",
                                 "paid_impressions": "Paid Impressions",
                                 "revenue": "Revenue",
                                 "ecpm": "eCPM",
@@ -955,9 +968,9 @@ with tab_seller:
             except Exception:
                 pass
 
-        # Add Magnite PA / PD / PMP deals (PG excluded — that comes from GAM)
+        # Add Magnite PMP deals only (PA / PD / PG all come from GAM)
         _magnite_summary = pd.DataFrame()
-        _mag_types = [t for t in (sel_pmp_deal_types or ["Private Auction", "Preferred Deal", "Private Marketplace"]) if t != "Programmatic Guaranteed"]
+        _mag_types = [t for t in (sel_pmp_deal_types or ["Private Marketplace"]) if t == "Private Marketplace"]
         if _mag_types:
             try:
                 _mag_df = load("by_deal_daily").copy()
@@ -1004,12 +1017,14 @@ with tab_seller:
                 pass
 
         combined_pmp = pd.concat(
-            [df for df in [pmp_summary, _magnite_summary, _gam_pg_summary] if not df.empty],
+            [df for df in [pmp_summary, _magnite_summary, _gam_summary] if not df.empty],
             ignore_index=True,
         ).sort_values("Revenue", ascending=False)
 
         if sel_pmp_ssps:
             combined_pmp = combined_pmp[combined_pmp["SSP"].isin(sel_pmp_ssps)]
+        if sel_pmp_dsps:
+            combined_pmp = combined_pmp[combined_pmp["DSP"].isin(sel_pmp_dsps)]
 
         pm1, pm2, pm3 = st.columns(3)
         pm1.metric("Paid impressions", f"{combined_pmp['Paid Impressions'].sum():,.0f}")
