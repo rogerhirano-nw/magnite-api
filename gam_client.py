@@ -46,14 +46,14 @@ class GAMClient:
     def __init__(self) -> None:
         sa_json = os.environ["GAM_SERVICE_ACCOUNT_JSON"]
         self.network_id = os.environ["GAM_NETWORK_ID"]
-        self._client = self._build_client(sa_json)
+        self._client = self._build_client(sa_json, self.network_id)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_client(sa_json_str: str) -> ad_manager.AdManagerClient:
+    def _build_client(sa_json_str: str, network_code: str) -> ad_manager.AdManagerClient:
         """Write service account JSON to a temp file and build the client."""
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".json", delete=False
@@ -68,7 +68,7 @@ class GAMClient:
         return ad_manager.AdManagerClient(
             oauth2_client,
             "Newsweek Ad Ops Dashboard",
-            network_code=json.loads(sa_json_str).get("project_id", ""),
+            network_code=network_code,
         )
 
     def _report_service(self):
