@@ -24,6 +24,7 @@ import sqlalchemy
 from sqlalchemy import inspect as sa_inspect, text
 
 from client import MagniteClient
+from gam_client import GAMClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -98,6 +99,40 @@ def refresh_one_report(client: MagniteClient, table: str, config: dict) -> int:
     return len(df)
 
 
+def refresh_gam() -> int:
+    """Pull GAM delivery + pacing for the last 7 days and write to campaigns_gam."""
+    from datetime import date as _date
+
+    logger.info("Refreshing campaigns_gam (GAM)")
+    gam = GAMClient()
+
+    yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
+    seven_days_ago = yesterday - timedelta(days=6)  # last 7 days inclusive
+
+    df = gam.run_report_with_pacing(seven_days_ago, yesterday)
+    if df.empty:
+        logger.warning("GAM report came back empty — nothing to write")
+        return 0
+
+    df["_pulled_at"] = datetime.now(timezone.utc).isoformat()
+    df["source"] = "gam"
+    df["campaign_type"] = "direct"
+
+    table = "campaigns_gam"
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=8)).strftime("%Y-%m-%d")
+
+    with _engine().begin() as conn:
+        if table in sa_inspect(conn).get_table_names():
+            conn.execute(
+                text(f'DELETE FROM "{table}" WHERE report_start >= :cutoff'),
+                {"cutoff": cutoff},
+            )
+        df.to_sql(table, conn, if_exists="append", index=False)
+
+    logger.info("Wrote %d rows to %s", len(df), table)
+    return len(df)
+
+
 def _load_dotenv() -> None:
     env_file = Path(__file__).parent / ".env"
     if not env_file.exists():
@@ -130,6 +165,11 @@ def main() -> None:
             logger.exception("Refresh failed for %s — continuing with others", table)
 
     logger.info("Done. %d total rows written across %d reports.", total, len(REPORTS))
+
+    try:
+        total += refresh_gam()
+    except Exception:
+        logger.exception("Refresh failed for campaigns_gam — continuing")
 
 
 if __name__ == "__main__":

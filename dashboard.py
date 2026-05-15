@@ -94,7 +94,7 @@ def load(table: str) -> pd.DataFrame:
         return pd.read_sql(f"SELECT * FROM {table}", conn)
 
 
-tab_site, tab_dsp, tab_deal = st.tabs(["By Site / Size", "By DSP", "By Deal"])
+tab_site, tab_dsp, tab_deal, tab_seller = st.tabs(["By Site / Size", "By DSP", "By Deal", "Seller View"])
 
 with tab_site:
     df = load("by_site_size_daily")
@@ -392,3 +392,140 @@ with tab_dsp:
                 "win_rate": st.column_config.NumberColumn(format="localized"),
             },
         )
+
+with tab_seller:
+    import re as _re
+
+    gam_df = load("campaigns_gam")
+    if gam_df.empty:
+        st.info("No GAM data yet. Run refresh_cache.py to populate campaigns_gam.")
+    else:
+        last_pull = gam_df["_pulled_at"].max() if "_pulled_at" in gam_df else "unknown"
+        st.caption(f"Last refresh: {last_pull}")
+
+        gam_df = gam_df.copy()
+
+        # Parse dates from report_start / report_end; fall back to start_date/end_date
+        for datecol in ("start_date", "end_date", "report_start", "report_end"):
+            if datecol in gam_df.columns:
+                gam_df[datecol] = pd.to_datetime(gam_df[datecol], errors="coerce").dt.date
+
+        # Build a display date column for the date_filter helper
+        if "start_date" in gam_df.columns:
+            gam_df["_display_date"] = gam_df["start_date"]
+        else:
+            gam_df["_display_date"] = date.today()
+
+        dmin_gam = gam_df["_display_date"].min() or date.today() - timedelta(days=7)
+        dmax_gam = gam_df["_display_date"].max() or date.today()
+
+        start_s, end_s = date_filter("seller", dmin_gam, dmax_gam)
+
+        # Extract seller from order_name
+        gam_df["seller_ae"] = (
+            gam_df["order_name"]
+            .str.extract(r"Team-(?:USA|INTL)_([A-Za-z]+)", expand=False)
+            .map(AE_NAMES)
+        )
+
+        sellers = sorted(gam_df["seller_ae"].dropna().unique())
+        selected_seller = st.selectbox(
+            "Seller",
+            options=sellers,
+            key="seller_select",
+        ) if sellers else None
+
+        if not selected_seller:
+            st.info("No sellers found in order_name — check that order names follow the Team-USA/INTL_Name pattern.")
+        else:
+            view_gam = gam_df[gam_df["seller_ae"] == selected_seller].copy()
+
+            # Date filter on campaign start_date
+            view_gam = view_gam[
+                (view_gam["_display_date"] >= start_s)
+                & (view_gam["_display_date"] <= end_s)
+            ]
+
+            # ---------- Summary metrics ----------
+            total_impr = view_gam["impressions_delivered"].sum() if "impressions_delivered" in view_gam else 0
+            total_rev  = view_gam["ad_server_cpm_and_cpc_revenue"].sum() if "ad_server_cpm_and_cpc_revenue" in view_gam else 0
+            avg_pacing = view_gam["pacing_pct"].mean() if "pacing_pct" in view_gam else None
+            avg_viewability = (
+                view_gam["ad_server_active_view_viewable_impressions_rate"].mean()
+                if "ad_server_active_view_viewable_impressions_rate" in view_gam else None
+            )
+            avg_vcr = view_gam["vcr"].mean() if "vcr" in view_gam else None
+            avg_ctr = view_gam["ad_server_ctr"].mean() if "ad_server_ctr" in view_gam else None
+
+            m1, m2, m3, m4, m5, m6 = st.columns(6)
+            m1.metric("Impressions", f"{int(total_impr):,}")
+            m2.metric("Revenue", f"${total_rev:,.2f}")
+            m3.metric("Avg Pacing %", f"{avg_pacing:.1f}%" if avg_pacing is not None else "—")
+            m4.metric("Avg Viewability", f"{avg_viewability:.1f}%" if avg_viewability is not None else "—")
+            m5.metric("Avg VCR", f"{avg_vcr:.1f}%" if avg_vcr is not None else "—")
+            m6.metric("Avg CTR", f"{avg_ctr:.3f}%" if avg_ctr is not None else "—")
+
+            # ---------- Pacing alerts ----------
+            if "pacing_pct" in view_gam:
+                under_pacing = view_gam[view_gam["pacing_pct"] < 85][
+                    ["line_item_name", "order_name", "pacing_pct"]
+                ].drop_duplicates("line_item_name")
+                over_pacing = view_gam[view_gam["pacing_pct"] > 115][
+                    ["line_item_name", "order_name", "pacing_pct"]
+                ].drop_duplicates("line_item_name")
+
+                if not under_pacing.empty:
+                    names = ", ".join(
+                        f"{r['line_item_name']} ({r['pacing_pct']:.0f}%)"
+                        for _, r in under_pacing.iterrows()
+                    )
+                    st.warning(f"Under-pacing (<85%): {names}")
+                if not over_pacing.empty:
+                    names = ", ".join(
+                        f"{r['line_item_name']} ({r['pacing_pct']:.0f}%)"
+                        for _, r in over_pacing.iterrows()
+                    )
+                    st.success(f"Over-pacing (>115%): {names}")
+
+            # ---------- Campaign table ----------
+            display_cols = {
+                "line_item_name": "Line Item",
+                "order_name": "Order",
+                "impressions_goal": "Goal",
+                "impressions_delivered": "Delivered",
+                "pacing_pct": "Pacing %",
+                "ad_server_active_view_viewable_impressions_rate": "Viewability %",
+                "vcr": "VCR %",
+                "ad_server_ctr": "CTR %",
+                "ad_server_cpm_and_cpc_revenue": "Revenue",
+            }
+            available_cols = [c for c in display_cols if c in view_gam.columns]
+            table_df = (
+                view_gam[available_cols]
+                .drop_duplicates(subset=["line_item_name"] if "line_item_name" in available_cols else None)
+                .rename(columns={c: display_cols[c] for c in available_cols})
+                .sort_values("Pacing %" if "Pacing %" in [display_cols[c] for c in available_cols] else available_cols[0])
+            )
+
+            col_config = {}
+            if "Goal" in table_df.columns:
+                col_config["Goal"] = st.column_config.NumberColumn(format="localized")
+            if "Delivered" in table_df.columns:
+                col_config["Delivered"] = st.column_config.NumberColumn(format="localized")
+            if "Pacing %" in table_df.columns:
+                col_config["Pacing %"] = st.column_config.NumberColumn(format="%.1f")
+            if "Viewability %" in table_df.columns:
+                col_config["Viewability %"] = st.column_config.NumberColumn(format="%.1f")
+            if "VCR %" in table_df.columns:
+                col_config["VCR %"] = st.column_config.NumberColumn(format="%.1f")
+            if "CTR %" in table_df.columns:
+                col_config["CTR %"] = st.column_config.NumberColumn(format="%.3f")
+            if "Revenue" in table_df.columns:
+                col_config["Revenue"] = st.column_config.NumberColumn(format="dollar")
+
+            st.dataframe(
+                table_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config=col_config,
+            )
