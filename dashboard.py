@@ -735,10 +735,10 @@ with tab_seller:
             has_vcr = "vcr" in view_gam.columns and view_gam["vcr"].notna().any()
 
             display_cols = {
+                "advertiser": "Advertiser",
                 "line_item_name": "Line Item",
                 "campaign_name": "Campaign",
                 "seller_ae": "Seller",
-                "advertiser": "Advertiser",
                 "ad_format": "Format",
                 "impressions_goal": "Goal",
                 "impressions_delivered": "Delivered",
