@@ -126,12 +126,15 @@ class GAMClient:
         job_id = report_job_result["id"]
         logger.info("GAM report job submitted, id=%s", job_id)
 
-        # Poll until complete
-        status = "IN_PROGRESS"
+        # Poll until complete (max 10 minutes)
+        status    = "IN_PROGRESS"
+        deadline  = time.time() + 600
         while status == "IN_PROGRESS":
-            time.sleep(5)
+            if time.time() > deadline:
+                raise RuntimeError(f"GAM report job {job_id} timed out after 10 minutes")
+            time.sleep(10)
             status = report_service.getReportJobStatus(job_id)
-            logger.debug("GAM report job %s status: %s", job_id, status)
+            logger.info("GAM report job %s status: %s", job_id, status)
 
         if status != "COMPLETED":
             raise RuntimeError(f"GAM report job {job_id} ended with status {status!r}")
