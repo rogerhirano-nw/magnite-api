@@ -17,10 +17,11 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import sqlalchemy
+from sqlalchemy import inspect as sa_inspect, text
 
 from client import MagniteClient
 
@@ -46,7 +47,7 @@ REPORTS = {
             "publisher_gross_revenue",
             "ecpm",
         ],
-        "date_range": "year_to_date",
+        "date_range": "last_7_days",
     },
     "by_dsp_daily": {
         "dimensions": ["date", "partner", "site"],
@@ -58,7 +59,7 @@ REPORTS = {
             "publisher_gross_revenue",
             "win_rate",
         ],
-        "date_range": "year_to_date",
+        "date_range": "last_7_days",
     },
     "by_deal_daily": {
         "dimensions": ["date", "deal", "deal_id"],
@@ -71,7 +72,7 @@ REPORTS = {
             "seller_net_revenue",
             "ecpm",
         ],
-        "date_range": "year_to_date",
+        "date_range": "last_7_days",
     },
     # Add Prebid-specific reports here once you've confirmed the column names
     # against the logged-in Prebid Analytics API docs, and set dataset="prebid".
@@ -87,9 +88,12 @@ def refresh_one_report(client: MagniteClient, table: str, config: dict) -> int:
         return 0
 
     df["_pulled_at"] = datetime.now(timezone.utc).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=8)).strftime("%Y-%m-%d")
 
     with _engine().begin() as conn:
-        df.to_sql(table, conn, if_exists="replace", index=False)
+        if table in sa_inspect(conn).get_table_names():
+            conn.execute(text(f'DELETE FROM "{table}" WHERE date >= :cutoff'), {"cutoff": cutoff})
+        df.to_sql(table, conn, if_exists="append", index=False)
     logger.info("Wrote %d rows to %s", len(df), table)
     return len(df)
 
