@@ -150,7 +150,7 @@ def load(table: str) -> pd.DataFrame:
         return pd.read_sql(f"SELECT * FROM {table}", conn)
 
 
-tab_site, tab_dsp, tab_deal, tab_seller = st.tabs(["By Site / Size", "By DSP", "By Deal", "Seller View"])
+tab_site, tab_dsp, tab_deal, tab_pubmatic, tab_seller = st.tabs(["By Site / Size", "By DSP", "By Deal", "Pubmatic PMP", "Seller View"])
 
 with tab_site:
     df = load("by_site_size_daily")
@@ -478,6 +478,116 @@ with tab_dsp:
                 "impressions": st.column_config.NumberColumn(format="localized"),
                 "publisher_gross_revenue": st.column_config.NumberColumn(format="dollar"),
                 "win_rate": st.column_config.NumberColumn(format="localized"),
+            },
+        )
+
+with tab_pubmatic:
+    try:
+        pm_df = load("deals_pubmatic")
+    except Exception:
+        st.info("No Pubmatic data yet — run refresh_cache.py to populate deals_pubmatic.")
+        pm_df = pd.DataFrame()
+
+    if pm_df.empty:
+        st.info("No Pubmatic data yet.")
+    else:
+        last_pull = pm_df["_pulled_at"].max() if "_pulled_at" in pm_df else "unknown"
+        st.caption(f"Last refresh: {last_pull}")
+
+        pm_df = pm_df.copy()
+        pm_df["date"] = pd.to_datetime(pm_df["date"]).dt.date
+
+        # Use publisher_deal_id as the display label when deal name is missing
+        if "deal" not in pm_df.columns:
+            pm_df["deal"] = None
+        if "publisher_deal_id" not in pm_df.columns:
+            pm_df["publisher_deal_id"] = None
+        pm_df["deal_label"] = pm_df["deal"].fillna(pm_df["publisher_deal_id"]).fillna(pm_df["deal_meta_id"].astype(str))
+
+        dmin, dmax = pm_df["date"].min(), pm_df["date"].max()
+        start, end = date_filter("pubmatic", dmin, dmax)
+
+        f1, f2 = st.columns(2)
+        with f1:
+            dsp_opts = sorted(pm_df["dsp"].dropna().unique()) if "dsp" in pm_df.columns else []
+            sel_dsps = st.multiselect("DSP", dsp_opts, key="pm_dsp_filter")
+        with f2:
+            pm_search = st.text_input("Search deals", placeholder="Type to filter…", key="pm_deal_search")
+
+        view = pm_df[(pm_df["date"] >= start) & (pm_df["date"] <= end)]
+        if sel_dsps:
+            view = view[view["dsp"].isin(sel_dsps)]
+        if pm_search:
+            view = view[view["deal_label"].str.contains(pm_search, case=False, na=False)]
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Paid impressions", f"{view['paid_impressions'].sum():,.0f}")
+        c2.metric("Revenue", f"${view['revenue'].sum():,.2f}")
+        c3.metric("Avg eCPM", f"${view['ecpm'].mean():,.2f}" if len(view) else "—")
+        c4.metric("Win rate", f"{view['win_rate'].mean():,.1f}%" if len(view) else "—")
+
+        col_deals, col_dsps = st.columns(2)
+        with col_deals:
+            st.subheader("Top 10 deals by revenue")
+            top_deals = (
+                view.groupby("deal_label")["revenue"]
+                .sum().nlargest(10).sort_values(ascending=True).reset_index()
+                .rename(columns={"deal_label": "Deal", "revenue": "Revenue"})
+            )
+            if not top_deals.empty:
+                chart = alt.Chart(top_deals).mark_bar().encode(
+                    x=alt.X("Revenue:Q", title="Revenue ($)"),
+                    y=alt.Y("Deal:N", sort="-x", title=None, axis=alt.Axis(labelLimit=400)),
+                    tooltip=["Deal", alt.Tooltip("Revenue:Q", format="$,.2f")],
+                ).properties(height=320)
+                st.altair_chart(chart, use_container_width=True)
+
+        with col_dsps:
+            st.subheader("Top 10 DSPs by revenue")
+            top_dsps = (
+                view.groupby("dsp")["revenue"]
+                .sum().nlargest(10).sort_values(ascending=True).reset_index()
+                .rename(columns={"dsp": "DSP", "revenue": "Revenue"})
+            ) if "dsp" in view.columns else pd.DataFrame()
+            if not top_dsps.empty:
+                chart_dsp = alt.Chart(top_dsps).mark_bar().encode(
+                    x=alt.X("Revenue:Q", title="Revenue ($)"),
+                    y=alt.Y("DSP:N", sort="-x", title=None, axis=alt.Axis(labelLimit=300)),
+                    tooltip=["DSP", alt.Tooltip("Revenue:Q", format="$,.2f")],
+                ).properties(height=320)
+                st.altair_chart(chart_dsp, use_container_width=True)
+
+        st.subheader("Daily revenue trend")
+        daily_pm = view.groupby("date")["revenue"].sum().rename("Revenue ($)")
+        st.line_chart(daily_pm, height=200)
+
+        # Zero-response alert
+        no_resp = (
+            view.groupby("deal_label")
+            .agg(paid_impressions=("paid_impressions", "sum"), responses=("non_zero_bid_responses", "sum"))
+            .query("paid_impressions == 0 and responses == 0")
+        ) if "non_zero_bid_responses" in view.columns else pd.DataFrame()
+        if not no_resp.empty:
+            st.warning(f"⚠️ {len(no_resp)} deal(s) with 0 paid impressions and 0 bid responses.")
+
+        st.dataframe(
+            view.sort_values("revenue", ascending=False),
+            use_container_width=True,
+            column_config={
+                "_pulled_at": None,
+                "source": None,
+                "deal_meta_id": None,
+                "dsp_id": None,
+                "deal": st.column_config.TextColumn("Deal Name"),
+                "deal_label": st.column_config.TextColumn("Deal"),
+                "publisher_deal_id": st.column_config.TextColumn("Publisher Deal ID"),
+                "dsp": st.column_config.TextColumn("DSP"),
+                "paid_impressions": st.column_config.NumberColumn(format="localized"),
+                "non_zero_bid_responses": st.column_config.NumberColumn("Bid Responses", format="localized"),
+                "total_requests": st.column_config.NumberColumn(format="localized"),
+                "revenue": st.column_config.NumberColumn(format="dollar"),
+                "ecpm": st.column_config.NumberColumn(format="dollar"),
+                "win_rate": st.column_config.NumberColumn("Win Rate %", format="localized"),
             },
         )
 
