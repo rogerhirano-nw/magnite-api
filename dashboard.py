@@ -820,6 +820,14 @@ with tab_seller:
             pmp_df["publisher_deal_id"] = None
         pmp_df["deal_label"] = pmp_df["deal"].fillna(pmp_df["publisher_deal_id"]).fillna(pmp_df["deal_meta_id"].astype(str))
 
+        # Apply the same seller filter as the Direct Campaigns table
+        pmp_df["seller_ae"] = (
+            pmp_df["deal"].str.extract(r"Team-(?:USA|INTL)_([A-Za-z]+)", expand=False)
+            .map(AE_NAMES)
+        )
+        if selected_seller != "All":
+            pmp_df = pmp_df[pmp_df["seller_ae"] == selected_seller]
+
         pmp_summary = (
             pmp_df.groupby(["deal_label", "dsp"], dropna=False)
             .agg(
