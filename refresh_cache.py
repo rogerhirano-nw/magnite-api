@@ -49,7 +49,7 @@ REPORTS = {
             "publisher_gross_revenue",
             "ecpm",
         ],
-        "date_range": "last_7_days",
+        "date_range": "last_7",
     },
     "by_dsp_daily": {
         "dimensions": ["date", "partner", "site"],
@@ -61,7 +61,7 @@ REPORTS = {
             "publisher_gross_revenue",
             "win_rate",
         ],
-        "date_range": "last_7_days",
+        "date_range": "last_7",
     },
     "by_deal_daily": {
         "dimensions": ["date", "deal", "deal_id", "partner", "ad_format"],
@@ -74,7 +74,7 @@ REPORTS = {
             "seller_net_revenue",
             "ecpm",
         ],
-        "date_range": "last_7_days",
+        "date_range": "last_7",
     },
     # Add Prebid-specific reports here once you've confirmed the column names
     # against the logged-in Prebid Analytics API docs, and set dataset="prebid".

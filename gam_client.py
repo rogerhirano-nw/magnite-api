@@ -63,7 +63,7 @@ class GAMClient:
 
         oauth2_client = GoogleServiceAccountClient(
             tmp_path,
-            scopes=_SCOPES,
+            scope=_SCOPES,
         )
         return ad_manager.AdManagerClient(
             oauth2_client,

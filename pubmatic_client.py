@@ -174,11 +174,9 @@ class PubmaticClient:
         params = {
             "fromDate":   start_date.strftime("%Y%m%d"),
             "toDate":     end_date.strftime("%Y%m%d"),
-            "dimensions": "date,deal,dealId,partnerId",
-            "metrics":    "impressions,paidImpressions,revenue,ecpm,"
-                          "bidRequests,bidResponses,winRate,vcr,viewability,ctr",
-            "dataType":   "deals",
-            "sort":       "date",
+            "dimensions": "date,deal,deal_id,partner_id",
+            "metrics":    "impressions,paid_impressions,revenue,ecpm,"
+                          "bid_requests,bid_responses,win_rate,vcr,viewability,ctr",
         }
 
         rows: list[dict] = []
