@@ -873,7 +873,7 @@ with tab_seller:
         pmp_df["ssp"] = "Pubmatic"
 
         pmp_summary = (
-            pmp_df.groupby(["ssp", "deal_label", "dsp", "seller_ae"], dropna=False)
+            pmp_df.groupby(["ssp", "deal_label", "deal_type_label", "dsp", "seller_ae"], dropna=False)
             .agg(
                 paid_impressions=("paid_impressions", "sum"),
                 revenue=("revenue", "sum"),
@@ -887,6 +887,7 @@ with tab_seller:
                 "ssp": "SSP",
                 "seller_ae": "Seller",
                 "deal_label": "Deal",
+                "deal_type_label": "Deal Type",
                 "dsp": "DSP",
                 "paid_impressions": "Paid Impressions",
                 "revenue": "Revenue",
@@ -931,6 +932,7 @@ with tab_seller:
                                 )
                                 .reset_index()
                             )
+                            _pg_agg["Deal Type"] = "Programmatic Guaranteed"
                             _pg_agg["DSP"] = None
                             _pg_agg["Win Rate %"] = None
                             _pg_agg["Total Requests"] = None
