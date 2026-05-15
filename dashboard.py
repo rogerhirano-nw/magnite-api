@@ -53,7 +53,7 @@ def _preset_range(preset: str, dmin: date, dmax: date) -> tuple[date, date]:
 
 
 def date_filter(key: str, dmin: date, dmax: date) -> tuple[date, date]:
-    preset = st.selectbox("Date range", PRESETS, index=0, key=f"{key}_preset")
+    preset = st.selectbox("Date range", PRESETS, index=PRESETS.index("Yesterday"), key=f"{key}_preset")
     if preset == "Custom":
         dr = st.date_input("Custom range", value=(dmin, dmax), min_value=dmin, max_value=dmax, key=f"{key}_custom")
         start, end = dr if isinstance(dr, tuple) and len(dr) == 2 else (dmin, dmax)
