@@ -645,7 +645,8 @@ with tab_seller:
         else:
             view_gam = gam_df[gam_df["seller_ae"] == selected_seller].copy()
 
-            # Date filter on campaign start_date
+            # Date filter on campaign start_date (drop NaT rows before comparing)
+            view_gam = view_gam[view_gam["_display_date"].notna()]
             view_gam = view_gam[
                 (view_gam["_display_date"] >= start_s)
                 & (view_gam["_display_date"] <= end_s)
