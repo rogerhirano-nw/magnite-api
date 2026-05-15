@@ -324,12 +324,23 @@ class GAMClient:
 
         agg = df_delivery.groupby("line_item_id", as_index=False).agg(**agg_spec)
 
+        # Yesterday's impressions only (most recent date in the report window)
+        latest_date = df_delivery["date"].max()
+        agg_1d = (
+            df_delivery[df_delivery["date"] == latest_date]
+            .groupby("line_item_id", as_index=False)["ad_server_impressions"]
+            .sum()
+            .rename(columns={"ad_server_impressions": "impressions_1d"})
+        )
+        agg_1d["line_item_id"] = agg_1d["line_item_id"].astype(str)
+
         # Ensure consistent string keys for join
         agg["line_item_id"] = agg["line_item_id"].astype(str)
         df_items["line_item_id"] = df_items["line_item_id"].astype(str)
 
         merged = df_items.merge(agg, on="line_item_id", how="left")
         merged = merged.merge(df_lifetime, on="line_item_id", how="left")
+        merged = merged.merge(agg_1d, on="line_item_id", how="left")
 
         # VCR — only computable when video columns were present in the report
         if "video_starts" in merged.columns and "video_completions" in merged.columns:

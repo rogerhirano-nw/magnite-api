@@ -626,7 +626,7 @@ with tab_seller:
             if datecol in gam_df.columns:
                 gam_df[datecol] = pd.to_datetime(gam_df[datecol], errors="coerce").dt.date
 
-        for numcol in ("pacing_pct", "impressions_delivered", "lifetime_impressions_delivered", "impressions_goal", "cpm_rate",
+        for numcol in ("pacing_pct", "impressions_delivered", "impressions_1d", "lifetime_impressions_delivered", "impressions_goal", "cpm_rate",
                        "ad_server_cpm_and_cpc_revenue", "ad_server_ctr",
                        "ad_server_active_view_viewable_impressions_rate", "vcr"):
             if numcol in gam_df.columns:
@@ -767,7 +767,7 @@ with tab_seller:
                 "impressions_goal": "Goal",
                 "cpm_rate": "CPM Rate",
                 "lifetime_impressions_delivered": "Delivered",
-                "impressions_delivered": "Impressions (7d)",
+                "impressions_1d": "Impressions (1d)",
                 "remaining_impressions": "Remaining",
                 "ad_server_clicks": "Clicks",
                 "pacing_pct": "Pacing %",
@@ -795,8 +795,8 @@ with tab_seller:
                 col_config["Delivered"] = st.column_config.NumberColumn(format="localized")
             if "Remaining" in table_df.columns:
                 col_config["Remaining"] = st.column_config.NumberColumn(format="localized")
-            if "Impressions (7d)" in table_df.columns:
-                col_config["Impressions (7d)"] = st.column_config.NumberColumn(format="localized")
+            if "Impressions (1d)" in table_df.columns:
+                col_config["Impressions (1d)"] = st.column_config.NumberColumn(format="localized")
             if "Clicks" in table_df.columns:
                 col_config["Clicks"] = st.column_config.NumberColumn(format="localized")
             if "Pacing %" in table_df.columns:
