@@ -862,12 +862,18 @@ with tab_seller:
         )
 
         try:
-            _mag_dsps = list(load("by_deal_daily")["partner"].dropna().unique())
+            _mag_side = load("by_deal_daily")
+            _mag_dsps = list(_mag_side["partner"].dropna().unique())
+            _mag_formats = list(_mag_side["ad_format"].dropna().unique()) if "ad_format" in _mag_side.columns else []
         except Exception:
             _mag_dsps = []
+            _mag_formats = []
         _dsp_opts = sorted(set(list(pmp_df["dsp"].dropna().unique()) + _mag_dsps))
+        _fmt_opts = sorted(set(
+            list(pmp_df["ad_format"].dropna().unique()) if "ad_format" in pmp_df.columns else []
+        ) | set(_mag_formats))
 
-        _pf1, _pf2, _pf3 = st.columns(3)
+        _pf1, _pf2, _pf3, _pf4 = st.columns(4)
         with _pf1:
             sel_pmp_deal_types = st.multiselect(
                 "Deal Type",
@@ -885,6 +891,12 @@ with tab_seller:
                 "DSP",
                 _dsp_opts,
                 key="campaigns_pmp_dsp_filter",
+            )
+        with _pf4:
+            sel_pmp_formats = st.multiselect(
+                "Format",
+                _fmt_opts,
+                key="campaigns_pmp_format_filter",
             )
         if sel_pmp_deal_types:
             pmp_df = pmp_df[pmp_df["deal_type_label"].isin(sel_pmp_deal_types)]
@@ -1027,6 +1039,8 @@ with tab_seller:
             combined_pmp = combined_pmp[combined_pmp["SSP"].isin(sel_pmp_ssps)]
         if sel_pmp_dsps:
             combined_pmp = combined_pmp[combined_pmp["DSP"].isin(sel_pmp_dsps)]
+        if sel_pmp_formats:
+            combined_pmp = combined_pmp[combined_pmp["Format"].isin(sel_pmp_formats)]
 
         pm1, pm2, pm3 = st.columns(3)
         pm1.metric("Paid impressions", f"{combined_pmp['Paid Impressions'].sum():,.0f}")
