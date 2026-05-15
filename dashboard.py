@@ -856,6 +856,20 @@ with tab_seller:
         if selected_seller != "All":
             pmp_df = pmp_df[pmp_df["seller_ae"] == selected_seller]
 
+        # Parse deal type from deal name
+        pmp_df["deal_type_label"] = pmp_df["deal"].apply(
+            lambda d: _parse_deal(d)["deal_type_label"]
+        )
+
+        _pmp_deal_type_opts = ["Private Auction", "Preferred Deal", "Programmatic Guaranteed"]
+        sel_pmp_deal_types = st.multiselect(
+            "Deal Type",
+            _pmp_deal_type_opts,
+            key="campaigns_pmp_deal_type_filter",
+        )
+        if sel_pmp_deal_types:
+            pmp_df = pmp_df[pmp_df["deal_type_label"].isin(sel_pmp_deal_types)]
+
         pmp_df["ssp"] = "Pubmatic"
 
         pmp_summary = (
@@ -885,7 +899,10 @@ with tab_seller:
 
         # Add Magnite PG deals (Programmatic Guaranteed lives in by_deal_daily)
         _mag_pg_summary = pd.DataFrame()
+        _include_pg = not sel_pmp_deal_types or "Programmatic Guaranteed" in sel_pmp_deal_types
         try:
+            if not _include_pg:
+                raise StopIteration
             _mag_df = load("by_deal_daily").copy()
             if not _mag_df.empty and "deal" in _mag_df.columns:
                 _parsed = _mag_df["deal"].apply(_parse_deal)
