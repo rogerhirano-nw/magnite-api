@@ -892,7 +892,7 @@ with tab_seller:
         pmp_df["ssp"] = "Pubmatic"
 
         pmp_summary = (
-            pmp_df.groupby(["ssp", "deal_label", "deal_type_label", "dsp", "seller_ae"], dropna=False)
+            pmp_df.groupby(["ssp", "deal_label", "deal_type_label", "ad_format", "dsp", "seller_ae"], dropna=False)
             .agg(
                 paid_impressions=("paid_impressions", "sum"),
                 revenue=("revenue", "sum"),
@@ -907,6 +907,7 @@ with tab_seller:
                 "seller_ae": "Seller",
                 "deal_label": "Deal",
                 "deal_type_label": "Deal Type",
+                "ad_format": "Format",
                 "dsp": "DSP",
                 "paid_impressions": "Paid Impressions",
                 "revenue": "Revenue",
@@ -926,9 +927,9 @@ with tab_seller:
                 _gam_raw = load("campaigns_gam").copy()
                 if not _gam_raw.empty and "order_name" in _gam_raw.columns:
                     _gam_raw = _gam_raw[~_gam_raw["order_name"].str.startswith("Newsweek_Test", na=False)]
-                    _gam_raw["deal_type_label"] = _gam_raw["order_name"].apply(
-                        lambda d: _parse_deal(d)["deal_type_label"]
-                    )
+                    _order_attrs = _gam_raw["order_name"].apply(_parse_deal)
+                    _gam_raw["deal_type_label"] = _order_attrs.apply(lambda s: s["deal_type_label"])
+                    _gam_raw["ad_format"] = _order_attrs.apply(lambda s: s["ad_format"])
                     _gam_deals = _gam_raw[_gam_raw["deal_type_label"].isin(_gam_deal_types)].copy()
                     if not _gam_deals.empty:
                         _gam_deals["ssp"] = "GAM"
@@ -944,7 +945,7 @@ with tab_seller:
                                 _gam_deals[_col] = pd.to_numeric(_gam_deals[_col], errors="coerce")
                         if not _gam_deals.empty:
                             _gam_agg = (
-                                _gam_deals.groupby(["ssp", "order_name", "deal_type_label", "seller_ae"], dropna=False)
+                                _gam_deals.groupby(["ssp", "order_name", "deal_type_label", "ad_format", "seller_ae"], dropna=False)
                                 .agg(
                                     paid_impressions=("lifetime_impressions_delivered", "sum"),
                                     revenue=("ad_server_cpm_and_cpc_revenue", "sum"),
@@ -961,6 +962,7 @@ with tab_seller:
                                 "seller_ae": "Seller",
                                 "order_name": "Deal",
                                 "deal_type_label": "Deal Type",
+                                "ad_format": "Format",
                                 "paid_impressions": "Paid Impressions",
                                 "revenue": "Revenue",
                                 "ecpm": "eCPM",
@@ -968,15 +970,14 @@ with tab_seller:
             except Exception:
                 pass
 
-        # Add Magnite PMP deals only (PA / PD / PG all come from GAM)
+        # Add Magnite PA / PD / PMP deals (PG only comes from GAM)
         _magnite_summary = pd.DataFrame()
-        _mag_types = [t for t in (sel_pmp_deal_types or ["Private Marketplace"]) if t == "Private Marketplace"]
+        _mag_types = [t for t in (sel_pmp_deal_types or ["Private Auction", "Preferred Deal", "Private Marketplace"]) if t != "Programmatic Guaranteed"]
         if _mag_types:
             try:
                 _mag_df = load("by_deal_daily").copy()
                 if not _mag_df.empty and "deal" in _mag_df.columns:
-                    _mag_parsed = _mag_df["deal"].apply(_parse_deal)
-                    _mag_df = pd.concat([_mag_df, _mag_parsed], axis=1)
+                    _mag_df["deal_type_label"] = _mag_df["deal"].apply(lambda d: _parse_deal(d)["deal_type_label"])
                     _mag_df = _mag_df[_mag_df["deal_type_label"].isin(_mag_types)]
                     _mag_df["ssp"] = "Magnite"
                     _mag_df["seller_ae"] = (
@@ -987,7 +988,7 @@ with tab_seller:
                         _mag_df = _mag_df[_mag_df["seller_ae"] == selected_seller]
                     if not _mag_df.empty:
                         _mag_agg = (
-                            _mag_df.groupby(["ssp", "deal", "deal_type_label", "partner", "seller_ae"], dropna=False)
+                            _mag_df.groupby(["ssp", "deal", "deal_type_label", "ad_format", "partner", "seller_ae"], dropna=False)
                             .agg(
                                 paid_impressions=("paid_impression", "sum"),
                                 revenue=("publisher_gross_revenue", "sum"),
@@ -1006,6 +1007,7 @@ with tab_seller:
                             "seller_ae": "Seller",
                             "deal": "Deal",
                             "deal_type_label": "Deal Type",
+                            "ad_format": "Format",
                             "partner": "DSP",
                             "paid_impressions": "Paid Impressions",
                             "revenue": "Revenue",
