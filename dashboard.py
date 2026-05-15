@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 from datetime import date, timedelta
 
+import altair as alt
 import pandas as pd
 import sqlalchemy
 import streamlit as st
@@ -246,9 +247,15 @@ with tab_deal:
         with col_deals:
             st.subheader("Top 10 deals by revenue")
             top10_deals = (view.groupby("deal")["publisher_gross_revenue"]
-                           .sum().nlargest(10).sort_values(ascending=True)
-                           .rename("Revenue ($)"))
-            st.bar_chart(top10_deals, height=280, horizontal=True)
+                           .sum().nlargest(10)
+                           .reset_index()
+                           .rename(columns={"deal": "Deal", "publisher_gross_revenue": "Revenue"}))
+            chart = alt.Chart(top10_deals).mark_bar().encode(
+                x=alt.X("Revenue:Q", title="Revenue ($)"),
+                y=alt.Y("Deal:N", sort="-x", title=None, axis=alt.Axis(labelLimit=500)),
+                tooltip=["Deal", alt.Tooltip("Revenue:Q", format="$,.2f")],
+            ).properties(height=320)
+            st.altair_chart(chart, use_container_width=True)
         with col_ae:
             st.subheader("Revenue by Seller")
             ae_rev = (view.groupby("seller_ae")["publisher_gross_revenue"]
