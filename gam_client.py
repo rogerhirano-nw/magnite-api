@@ -216,7 +216,7 @@ class GAMClient:
 
             if result.totalResultSetSize <= statement.offset + len(result.results):
                 break
-            statement.IncreaseOffsetBy(500)
+            statement.Offset(statement.offset + 500)
 
         return pd.DataFrame(rows)
 
