@@ -282,15 +282,17 @@ class GAMClient:
 
         def _pacing(row) -> Optional[float]:
             try:
-                goal = row["impressions_goal"]
-                delivered = row["impressions_delivered"]
-                if not goal or goal == 0:
-                    return None
                 li_start = pd.to_datetime(row["start_date"]).date()
                 li_end = pd.to_datetime(row["end_date"]).date()
                 total_days = max((li_end - li_start).days, 1)
                 elapsed = max((min(today, li_end) - li_start).days, 1)
-                return (delivered / goal) / (elapsed / total_days) * 100
+                goal = row["impressions_goal"]
+                delivered = row["impressions_delivered"]
+                if goal and goal > 0 and pd.notna(delivered):
+                    # Impression-based pacing
+                    return (delivered / goal) / (elapsed / total_days) * 100
+                # Elapsed-time pacing for campaigns with no impression goal
+                return elapsed / total_days * 100
             except Exception:
                 return None
 
