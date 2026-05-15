@@ -63,9 +63,65 @@ def date_filter(key: str, dmin: date, dmax: date) -> tuple[date, date]:
     return max(start, dmin), min(end, dmax)
 
 DEAL_TYPE_NAMES = {
-    "PA": "Private Auction",
-    "PD": "Preferred Deal",
+    "PA":  "Private Auction",
+    "PD":  "Preferred Deal",
+    "PG":  "Programmatic Guaranteed",
+    "PMP": "Private Marketplace",
 }
+
+KNOWN_FORMATS = {"Display", "Native", "Video", "CTV", "OLV", "Banner"}
+
+
+def _parse_deal(deal: str) -> pd.Series:
+    """Extract fields from Newsweek structured deal name.
+
+    Format: Newsweek_TYPE_VERTICAL_PLATFORM_DSP_..._FORMAT_$PRICE_Team-X_AE
+    """
+    empty = pd.Series({
+        "revenue_source": "Open Market",
+        "deal_type_label": None,
+        "dsp": None,
+        "ad_format": None,
+        "floor_price": None,
+    })
+    raw = str(deal).strip() if deal else ""
+    if not raw or raw.upper().replace("-", "").replace("/", "") in ("NA", "0"):
+        return empty
+
+    parts = raw.split("_")
+
+    # Position 1 → deal type
+    deal_type_label = None
+    if len(parts) > 1:
+        dt = parts[1].strip()
+        deal_type_label = DEAL_TYPE_NAMES.get(dt, dt)
+
+    # Position 3 → platform / revenue source
+    revenue_source = "Publisher"
+    if len(parts) > 3:
+        platform = parts[3].strip().lower()
+        if platform == "magnite":
+            revenue_source = "Magnite"
+
+    # Position 4 → DSP
+    dsp = parts[4].strip() if len(parts) > 4 else None
+
+    # Scan for format and floor price
+    ad_format = floor_price = None
+    for part in parts:
+        p = part.strip()
+        if p in KNOWN_FORMATS and ad_format is None:
+            ad_format = p
+        if p.startswith("$") and floor_price is None:
+            floor_price = p
+
+    return pd.Series({
+        "revenue_source":  revenue_source,
+        "deal_type_label": deal_type_label,
+        "dsp":             dsp,
+        "ad_format":       ad_format,
+        "floor_price":     floor_price,
+    })
 
 AE_NAMES = {
     "AShah": "Amit Shah",
@@ -181,52 +237,85 @@ with tab_deal:
         st.caption(f"Last refresh: {last_pull}")
 
         df = df.copy()
-        df = df[
-            df["deal"].notna()
-            & (df["deal"].astype(str).str.strip(" -").str.upper() != "N/A")
-            & df["deal_id"].notna()
-            & (df["deal_id"].astype(str).str.strip() != "0")
-        ]
         df["date"] = pd.to_datetime(df["date"]).dt.date
-        df["seller_ae"] = df["deal"].str.extract(
-            r"Team-(?:USA|INTL)_([A-Za-z]+)", expand=False
-        )
-        df["seller_ae"] = df["seller_ae"].map(AE_NAMES).fillna(df["seller_ae"])
-        df["deal_type"] = df["deal"].str.extract(r"^Newsweek_(PA|PD)_", expand=False)
-        df["deal_type"] = df["deal_type"].map(DEAL_TYPE_NAMES).fillna(df["deal_type"])
-        dmin, dmax = df["date"].min(), df["date"].max()
 
+        # Normalize open market rows (null deal or deal_id=0)
+        open_market_mask = (
+            df["deal"].isna()
+            | (df["deal"].astype(str).str.strip(" -/").str.upper() == "NA")
+            | (df["deal_id"].astype(str).str.strip() == "0")
+        )
+        df.loc[open_market_mask, "deal"] = "Open Market"
+
+        # Parse deal name into structured fields
+        parsed = df["deal"].apply(_parse_deal)
+        df = pd.concat([df, parsed], axis=1)
+        df.loc[open_market_mask, "revenue_source"] = "Open Market"
+
+        # Seller AE
+        df["seller_ae"] = (
+            df["deal"].str.extract(r"Team-(?:USA|INTL)_([A-Za-z]+)", expand=False)
+            .map(AE_NAMES)
+        )
+
+        dmin, dmax = df["date"].min(), df["date"].max()
         start, end = date_filter("deal", dmin, dmax)
 
-        f1, f2, f3 = st.columns(3)
+        f1, f2, f3, f4 = st.columns(4)
         with f1:
-            types = st.multiselect(
-                "Filter deal type",
-                sorted(df["deal_type"].dropna().unique()),
-                key="deal_type_filter",
+            rev_sources = st.multiselect(
+                "Revenue source",
+                sorted(df["revenue_source"].dropna().unique()),
+                key="deal_rev_source_filter",
             )
         with f2:
+            types = st.multiselect(
+                "Deal type",
+                sorted(df["deal_type_label"].dropna().unique()),
+                key="deal_type_filter",
+            )
+        with f3:
+            dsps = st.multiselect(
+                "DSP",
+                sorted(df["dsp"].dropna().unique()),
+                key="deal_dsp_filter",
+            )
+        with f4:
+            formats = st.multiselect(
+                "Format",
+                sorted(df["ad_format"].dropna().unique()),
+                key="deal_format_filter",
+            )
+
+        f5, f6, f7 = st.columns(3)
+        with f5:
             aes = st.multiselect(
                 "Filter by Seller",
                 sorted(df["seller_ae"].dropna().unique()),
                 key="deal_ae_filter",
             )
-        with f3:
-            deals = st.multiselect(
-                "Filter deals",
-                sorted(df["deal"].dropna().unique()),
-                key="deal_filter",
+        with f6:
+            floors = st.multiselect(
+                "Floor price",
+                sorted(df["floor_price"].dropna().unique()),
+                key="deal_floor_filter",
             )
-
-        deal_search = st.text_input("Search deals by name", placeholder="Type to filter…", key="deal_search")
+        with f7:
+            deal_search = st.text_input("Search deals by name", placeholder="Type to filter…", key="deal_search")
 
         view = df[(df["date"] >= start) & (df["date"] <= end)]
+        if rev_sources:
+            view = view[view["revenue_source"].isin(rev_sources)]
         if types:
-            view = view[view["deal_type"].isin(types)]
+            view = view[view["deal_type_label"].isin(types)]
+        if dsps:
+            view = view[view["dsp"].isin(dsps)]
+        if formats:
+            view = view[view["ad_format"].isin(formats)]
         if aes:
             view = view[view["seller_ae"].isin(aes)]
-        if deals:
-            view = view[view["deal"].isin(deals)]
+        if floors:
+            view = view[view["floor_price"].isin(floors)]
         if deal_search:
             view = view[view["deal"].str.contains(deal_search, case=False, na=False)]
 
@@ -235,21 +324,28 @@ with tab_deal:
         c2.metric("Gross revenue", f"${view['publisher_gross_revenue'].sum():,.2f}")
         c3.metric("Net revenue", f"${view['seller_net_revenue'].sum():,.2f}")
 
-        # Deals with no impressions
-        if len(view) > 0:
-            zero_imp = view.groupby("deal")["impressions"].sum()
+        # Zero-impression alert (exclude Open Market — it always has impressions)
+        pmp_view = view[view["revenue_source"] != "Open Market"]
+        if len(pmp_view) > 0:
+            zero_imp = pmp_view.groupby("deal")["impressions"].sum()
             zero_imp = zero_imp[zero_imp == 0]
             if not zero_imp.empty:
                 st.warning(f"⚠️ {len(zero_imp)} deal(s) with 0 impressions — needs attention.")
                 with st.expander("View deals"):
-                    zero_df = (zero_imp.reset_index()[["deal"]]
-                               .rename(columns={"deal": "Deal"}))
-                    zero_df["Seller"] = zero_df["Deal"].str.extract(r"Team-(?:USA|INTL)_([A-Za-z]+)", expand=False).map(AE_NAMES).fillna("")
-                    days_count = (view[view["deal"].isin(zero_imp.index)]
-                                  .groupby("deal")["date"].nunique())
+                    zero_df = zero_imp.reset_index()[["deal"]].rename(columns={"deal": "Deal"})
+                    zero_df["Seller"] = (
+                        zero_df["Deal"].str.extract(r"Team-(?:USA|INTL)_([A-Za-z]+)", expand=False)
+                        .map(AE_NAMES).fillna("")
+                    )
+                    days_count = (
+                        pmp_view[pmp_view["deal"].isin(zero_imp.index)]
+                        .groupby("deal")["date"].nunique()
+                    )
                     zero_df["Days with 0 impr."] = zero_df["Deal"].map(days_count).fillna(0).astype(int)
-                    deal_metrics = (view[view["deal"].isin(zero_imp.index)]
-                                    .groupby("deal")[["bid_requests", "bid_responses"]].sum())
+                    deal_metrics = (
+                        pmp_view[pmp_view["deal"].isin(zero_imp.index)]
+                        .groupby("deal")[["bid_requests", "bid_responses"]].sum()
+                    )
                     zero_df["bid_requests"]  = zero_df["Deal"].map(deal_metrics["bid_requests"]).fillna(0)
                     zero_df["bid_responses"] = zero_df["Deal"].map(deal_metrics["bid_responses"]).fillna(0)
 
@@ -268,13 +364,21 @@ with tab_deal:
                         hide_index=True,
                     )
 
-        col_deals, col_ae = st.columns(2)
+        col_src, col_deals, col_ae = st.columns(3)
+        with col_src:
+            st.subheader("Revenue by source")
+            src_rev = (
+                view.groupby("revenue_source")["publisher_gross_revenue"]
+                .sum().sort_values(ascending=True).rename("Revenue ($)")
+            )
+            st.bar_chart(src_rev, height=280, horizontal=True)
         with col_deals:
             st.subheader("Top 10 deals by revenue")
-            top10_deals = (view.groupby("deal")["publisher_gross_revenue"]
-                           .sum().nlargest(10)
-                           .reset_index()
-                           .rename(columns={"deal": "Deal", "publisher_gross_revenue": "Revenue"}))
+            top10_deals = (
+                pmp_view.groupby("deal")["publisher_gross_revenue"]
+                .sum().nlargest(10).reset_index()
+                .rename(columns={"deal": "Deal", "publisher_gross_revenue": "Revenue"})
+            )
             chart = alt.Chart(top10_deals).mark_bar().encode(
                 x=alt.X("Revenue:Q", title="Revenue ($)"),
                 y=alt.Y("Deal:N", sort="-x", title=None, axis=alt.Axis(labelLimit=500)),
@@ -283,8 +387,10 @@ with tab_deal:
             st.altair_chart(chart, use_container_width=True)
         with col_ae:
             st.subheader("Revenue by Seller")
-            ae_rev = (view.groupby("seller_ae")["publisher_gross_revenue"]
-                      .sum().sort_values(ascending=True).rename("Revenue ($)"))
+            ae_rev = (
+                pmp_view.groupby("seller_ae")["publisher_gross_revenue"]
+                .sum().sort_values(ascending=True).rename("Revenue ($)")
+            )
             st.bar_chart(ae_rev, height=280, horizontal=True)
 
         st.dataframe(
@@ -293,6 +399,12 @@ with tab_deal:
             column_config={
                 "_pulled_at": None,
                 "seller_ae": None,
+                "deal": st.column_config.TextColumn("Marketplace Deal Name"),
+                "revenue_source": st.column_config.TextColumn("Revenue Source"),
+                "deal_type_label": st.column_config.TextColumn("Deal Type"),
+                "dsp": st.column_config.TextColumn("DSP"),
+                "ad_format": st.column_config.TextColumn("Format"),
+                "floor_price": st.column_config.TextColumn("Floor Price"),
                 "bid_requests": st.column_config.NumberColumn(format="localized"),
                 "bid_responses": st.column_config.NumberColumn(format="localized"),
                 "impressions": st.column_config.NumberColumn(format="localized"),
