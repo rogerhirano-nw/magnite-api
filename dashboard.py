@@ -619,6 +619,7 @@ with tab_seller:
         st.caption(f"Last refresh: {last_pull}")
 
         gam_df = gam_df.copy()
+        gam_df = gam_df[gam_df["line_item_name"].str.startswith("Newsweek_Direct", na=False)]
 
         for datecol in ("start_date", "end_date"):
             if datecol in gam_df.columns:
