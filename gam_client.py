@@ -200,9 +200,11 @@ class GAMClient:
                     if gd is None:
                         return None
                     try:
-                        return f"{gd.year}-{gd.month:02d}-{gd.day:02d}"
+                        # GAM DateTime has a nested .date sub-object
+                        d = getattr(gd, "date", gd)
+                        return f"{d.year}-{d.month:02d}-{d.day:02d}"
                     except Exception:
-                        return str(gd)
+                        return None
 
                 # CPM rate from costPerUnit (stored in microcurrency)
                 cost_type = str(getattr(li, "costType", ""))
