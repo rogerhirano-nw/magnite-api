@@ -6,3 +6,4 @@ psycopg2-binary
 altair
 googleads
 google-auth
+agentmail
