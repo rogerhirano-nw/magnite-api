@@ -206,7 +206,7 @@ with tab_deal:
             )
         with f2:
             aes = st.multiselect(
-                "Filter seller (AE)",
+                "Filter by Seller",
                 sorted(df["seller_ae"].dropna().unique()),
                 key="deal_ae_filter",
             )
