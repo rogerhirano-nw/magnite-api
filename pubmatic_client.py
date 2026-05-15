@@ -201,7 +201,7 @@ class PubmaticClient:
             "fromDate":   start_date.strftime("%Y-%m-%dT00:00"),
             "toDate":     end_date.strftime("%Y-%m-%dT23:59"),
             "dateUnit":   "date",
-            "dimensions": "date,dealMetaId,publisherDealId,dspId",
+            "dimensions": "date,dealMetaId,publisherDealId,dspId,adFormatId",
             "metrics":    "paidImpressions,revenue,ecpm,nonZeroBidResponses,winRate,totalRequests",
         }
 
@@ -218,6 +218,8 @@ class PubmaticClient:
             "publisherDealId":       "publisher_deal_id",
             "dspId":                 "dsp_id",
             "dspId_name":            "dsp",
+            "adFormatId":            "ad_format_id",
+            "adFormatId_name":       "ad_format",
             "paidImpressions":       "paid_impressions",
             "revenue":               "revenue",
             "ecpm":                  "ecpm",

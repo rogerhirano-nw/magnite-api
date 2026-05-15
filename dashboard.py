@@ -515,8 +515,8 @@ with tab_pubmatic:
             deal_type_opts = sorted(pm_df["deal"].dropna().str.extract(r"Newsweek_([^_]+)", expand=False).dropna().unique()) if "deal" in pm_df.columns else []
             sel_deal_types = st.multiselect("Deal type", deal_type_opts, key="pm_deal_type_filter")
         with f3:
-            publisher_deal_opts = sorted(pm_df["publisher_deal_id"].dropna().unique()) if "publisher_deal_id" in pm_df.columns else []
-            sel_pub_deals = st.multiselect("Publisher deal ID", publisher_deal_opts, key="pm_pub_deal_filter")
+            format_opts = sorted(pm_df["ad_format"].dropna().unique()) if "ad_format" in pm_df.columns else []
+            sel_formats = st.multiselect("Format", format_opts, key="pm_format_filter")
 
         pm_search = st.text_input("Search deals by name", placeholder="Type to filter…", key="pm_deal_search")
 
@@ -525,8 +525,8 @@ with tab_pubmatic:
             view = view[view["dsp"].isin(sel_dsps)]
         if sel_deal_types:
             view = view[view["deal"].str.extract(r"Newsweek_([^_]+)", expand=False).isin(sel_deal_types)]
-        if sel_pub_deals:
-            view = view[view["publisher_deal_id"].isin(sel_pub_deals)]
+        if sel_formats and "ad_format" in view.columns:
+            view = view[view["ad_format"].isin(sel_formats)]
         if pm_search:
             view = view[view["deal_label"].str.contains(pm_search, case=False, na=False)]
 
@@ -588,6 +588,7 @@ with tab_pubmatic:
                 "source": None,
                 "deal_meta_id": None,
                 "dsp_id": None,
+                "ad_format_id": None,
                 "deal": st.column_config.TextColumn("Deal Name"),
                 "deal_label": st.column_config.TextColumn("Deal"),
                 "publisher_deal_id": st.column_config.TextColumn("Publisher Deal ID"),
