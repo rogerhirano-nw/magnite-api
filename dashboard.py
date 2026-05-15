@@ -851,7 +851,7 @@ with tab_seller:
         pmp_df["ssp"] = "Pubmatic"
 
         pmp_summary = (
-            pmp_df.groupby(["ssp", "deal_label", "dsp"], dropna=False)
+            pmp_df.groupby(["ssp", "deal_label", "dsp", "seller_ae"], dropna=False)
             .agg(
                 paid_impressions=("paid_impressions", "sum"),
                 revenue=("revenue", "sum"),
@@ -864,6 +864,7 @@ with tab_seller:
             .sort_values("revenue", ascending=False)
             .rename(columns={
                 "ssp": "SSP",
+                "seller_ae": "Seller",
                 "deal_label": "Deal",
                 "dsp": "DSP",
                 "paid_impressions": "Paid Impressions",
