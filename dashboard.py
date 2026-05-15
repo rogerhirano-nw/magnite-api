@@ -247,12 +247,7 @@ with tab_deal:
         )
         df.loc[open_market_mask, "deal"] = "Open Market"
 
-        # Parse deal name into structured fields
-        parsed = df["deal"].apply(_parse_deal)
-        df = pd.concat([df, parsed], axis=1)
-        df.loc[open_market_mask, "revenue_source"] = "Open Market"
-
-        # Seller AE
+        # Seller AE from deal name
         df["seller_ae"] = (
             df["deal"].str.extract(r"Team-(?:USA|INTL)_([A-Za-z]+)", expand=False)
             .map(AE_NAMES)
@@ -261,61 +256,19 @@ with tab_deal:
         dmin, dmax = df["date"].min(), df["date"].max()
         start, end = date_filter("deal", dmin, dmax)
 
-        f1, f2, f3, f4 = st.columns(4)
+        f1, f2 = st.columns(2)
         with f1:
-            rev_sources = st.multiselect(
-                "Revenue source",
-                sorted(df["revenue_source"].dropna().unique()),
-                key="deal_rev_source_filter",
-            )
-        with f2:
-            types = st.multiselect(
-                "Deal type",
-                sorted(df["deal_type_label"].dropna().unique()),
-                key="deal_type_filter",
-            )
-        with f3:
-            dsps = st.multiselect(
-                "DSP",
-                sorted(df["dsp"].dropna().unique()),
-                key="deal_dsp_filter",
-            )
-        with f4:
-            formats = st.multiselect(
-                "Format",
-                sorted(df["ad_format"].dropna().unique()),
-                key="deal_format_filter",
-            )
-
-        f5, f6, f7 = st.columns(3)
-        with f5:
             aes = st.multiselect(
                 "Filter by Seller",
                 sorted(df["seller_ae"].dropna().unique()),
                 key="deal_ae_filter",
             )
-        with f6:
-            floors = st.multiselect(
-                "Floor price",
-                sorted(df["floor_price"].dropna().unique()),
-                key="deal_floor_filter",
-            )
-        with f7:
+        with f2:
             deal_search = st.text_input("Search deals by name", placeholder="Type to filter…", key="deal_search")
 
         view = df[(df["date"] >= start) & (df["date"] <= end)]
-        if rev_sources:
-            view = view[view["revenue_source"].isin(rev_sources)]
-        if types:
-            view = view[view["deal_type_label"].isin(types)]
-        if dsps:
-            view = view[view["dsp"].isin(dsps)]
-        if formats:
-            view = view[view["ad_format"].isin(formats)]
         if aes:
             view = view[view["seller_ae"].isin(aes)]
-        if floors:
-            view = view[view["floor_price"].isin(floors)]
         if deal_search:
             view = view[view["deal"].str.contains(deal_search, case=False, na=False)]
 
@@ -364,16 +317,10 @@ with tab_deal:
                         hide_index=True,
                     )
 
-        col_src, col_deals, col_ae = st.columns(3)
-        with col_src:
-            st.subheader("Revenue by source")
-            src_rev = (
-                view.groupby("revenue_source")["publisher_gross_revenue"]
-                .sum().sort_values(ascending=True).rename("Revenue ($)")
-            )
-            st.bar_chart(src_rev, height=280, horizontal=True)
+        col_deals, col_ae = st.columns(2)
         with col_deals:
             st.subheader("Top 10 deals by revenue")
+            pmp_view = view[view["deal"] != "Open Market"]
             top10_deals = (
                 pmp_view.groupby("deal")["publisher_gross_revenue"]
                 .sum().nlargest(10).reset_index()
@@ -400,11 +347,6 @@ with tab_deal:
                 "_pulled_at": None,
                 "seller_ae": None,
                 "deal": st.column_config.TextColumn("Marketplace Deal Name"),
-                "revenue_source": st.column_config.TextColumn("Revenue Source"),
-                "deal_type_label": st.column_config.TextColumn("Deal Type"),
-                "dsp": st.column_config.TextColumn("DSP"),
-                "ad_format": st.column_config.TextColumn("Format"),
-                "floor_price": st.column_config.TextColumn("Floor Price"),
                 "bid_requests": st.column_config.NumberColumn(format="localized"),
                 "bid_responses": st.column_config.NumberColumn(format="localized"),
                 "impressions": st.column_config.NumberColumn(format="localized"),
