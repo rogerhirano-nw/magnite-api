@@ -645,11 +645,10 @@ with tab_seller:
         else:
             view_gam = gam_df[gam_df["seller_ae"] == selected_seller].copy()
 
-            # Date filter on campaign start_date (drop NaT rows before comparing)
-            view_gam = view_gam[view_gam["_display_date"].notna()]
+            # Date filter — coerce to Timestamp on both sides to avoid dtype mismatches
+            _dd = pd.to_datetime(view_gam["_display_date"], errors="coerce")
             view_gam = view_gam[
-                (view_gam["_display_date"] >= start_s)
-                & (view_gam["_display_date"] <= end_s)
+                (_dd >= pd.Timestamp(start_s)) & (_dd <= pd.Timestamp(end_s))
             ]
 
             # ---------- Summary metrics ----------
