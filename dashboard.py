@@ -715,7 +715,7 @@ with tab_seller:
             if "Pacing %" in table_df.columns:
                 col_config["Pacing %"] = st.column_config.NumberColumn(format="%.1f")
             if "Viewability %" in table_df.columns:
-                col_config["Viewability %"] = st.column_config.NumberColumn(format="%.1f")
+                col_config["Viewability %"] = st.column_config.NumberColumn(format="%.1f%%")
             if "VCR %" in table_df.columns:
                 col_config["VCR %"] = st.column_config.NumberColumn(format="%.1f")
             if "CTR %" in table_df.columns:
