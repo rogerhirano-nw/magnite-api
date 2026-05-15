@@ -153,9 +153,12 @@ class PubmaticClient:
         resp = requests.get(
             f"{_BASE_URL}/{self.publisher_id}",
             headers=self._headers(),
-            params={**params, "pageNumber": page, "pageSize": _PAGE_SIZE},
+            params={**params, "page": page, "limit": _PAGE_SIZE},
             timeout=60,
         )
+        logger.info("Pubmatic response status: %s — URL: %s", resp.status_code, resp.url)
+        if not resp.ok:
+            logger.error("Pubmatic error body: %s", resp.text[:500])
         resp.raise_for_status()
         return resp.json()
 
@@ -172,8 +175,8 @@ class PubmaticClient:
         bid_responses, win_rate, vcr, viewability, ctr, source.
         """
         params = {
-            "fromDate":   start_date.strftime("%Y-%m-%d"),
-            "toDate":     end_date.strftime("%Y-%m-%d"),
+            "startDate":  start_date.strftime("%Y-%m-%d"),
+            "endDate":    end_date.strftime("%Y-%m-%d"),
             "dimensions": "date",
             "metrics":    "impressions,revenue",
         }
