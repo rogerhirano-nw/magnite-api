@@ -177,7 +177,7 @@ class PubmaticClient:
         params = {
             "startDate":  start_date.strftime("%Y-%m-%d"),
             "endDate":    end_date.strftime("%Y-%m-%d"),
-            "dimensions": "date,deal_id,deal_name",
+            "dimensions": "date,dealId,dealName",
             "metrics":    "AD_IMPRESSION,NET_REVENUE,BID_REQUEST,BID_RESPONSE",
         }
 

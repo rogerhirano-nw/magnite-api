@@ -240,21 +240,22 @@ class GAMClient:
 
         # Aggregate delivery per line item across all dates in range
         # (keep date-level rows; pacing is computed per line item overall)
-        agg = (
-            df_delivery.groupby("line_item_id", as_index=False)
-            .agg(
-                impressions_delivered=("ad_server_impressions", "sum"),
-                ad_server_clicks=("ad_server_clicks", "sum"),
-                ad_server_ctr=("ad_server_ctr", "mean"),
-                ad_server_cpm_and_cpc_revenue=("ad_server_cpm_and_cpc_revenue", "sum"),
-                ad_server_active_view_viewable_impressions_rate=(
-                    "ad_server_active_view_viewable_impressions_rate",
-                    "mean",
-                ),
-                video_starts=("video_interaction_video_starts", "sum"),
-                video_completions=("video_interaction_video_completions", "sum"),
-            )
-        )
+        agg_spec = {
+            "impressions_delivered": ("ad_server_impressions", "sum"),
+            "ad_server_clicks": ("ad_server_clicks", "sum"),
+            "ad_server_ctr": ("ad_server_ctr", "mean"),
+            "ad_server_cpm_and_cpc_revenue": ("ad_server_cpm_and_cpc_revenue", "sum"),
+            "ad_server_active_view_viewable_impressions_rate": (
+                "ad_server_active_view_viewable_impressions_rate", "mean",
+            ),
+        }
+        # Video columns are absent when there are no video line items in the period
+        if "video_interaction_video_starts" in df_delivery.columns:
+            agg_spec["video_starts"] = ("video_interaction_video_starts", "sum")
+        if "video_interaction_video_completions" in df_delivery.columns:
+            agg_spec["video_completions"] = ("video_interaction_video_completions", "sum")
+
+        agg = df_delivery.groupby("line_item_id", as_index=False).agg(**agg_spec)
 
         # Ensure consistent string keys for join
         agg["line_item_id"] = agg["line_item_id"].astype(str)
@@ -262,13 +263,16 @@ class GAMClient:
 
         merged = df_items.merge(agg, on="line_item_id", how="left")
 
-        # VCR
-        merged["vcr"] = merged.apply(
-            lambda r: (r["video_completions"] / r["video_starts"] * 100)
-            if pd.notna(r.get("video_starts")) and r.get("video_starts", 0) > 0
-            else None,
-            axis=1,
-        )
+        # VCR — only computable when video columns were present in the report
+        if "video_starts" in merged.columns and "video_completions" in merged.columns:
+            merged["vcr"] = merged.apply(
+                lambda r: (r["video_completions"] / r["video_starts"] * 100)
+                if pd.notna(r.get("video_starts")) and r.get("video_starts", 0) > 0
+                else None,
+                axis=1,
+            )
+        else:
+            merged["vcr"] = None
 
         # Pacing
         today = date.today()
