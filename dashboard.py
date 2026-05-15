@@ -702,12 +702,21 @@ with tab_seller:
                 view_gam = view_gam.copy()
                 view_gam["ad_server_ctr"] = view_gam["ad_server_ctr"] * 100
 
+            # Extract format from line item name
+            view_gam = view_gam.copy()
+            view_gam["ad_format"] = view_gam["line_item_name"].apply(
+                lambda name: next(
+                    (p for p in str(name).split("_") if p.strip() in KNOWN_FORMATS), None
+                ) if pd.notna(name) else None
+            )
+
             has_vcr = "vcr" in view_gam.columns and view_gam["vcr"].notna().any()
 
             display_cols = {
                 "line_item_name": "Line Item",
                 "order_name": "Order",
                 "seller_ae": "Seller",
+                "ad_format": "Format",
                 "impressions_goal": "Goal",
                 "impressions_delivered": "Delivered",
                 "remaining_impressions": "Remaining",
