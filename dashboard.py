@@ -278,7 +278,7 @@ with tab_deal:
         c3.metric("Net revenue", f"${view['seller_net_revenue'].sum():,.2f}")
 
         # Zero-impression alert (exclude Open Market — it always has impressions)
-        pmp_view = view[view["revenue_source"] != "Open Market"]
+        pmp_view = view[view["deal"] != "Open Market"]
         if len(pmp_view) > 0:
             zero_imp = pmp_view.groupby("deal")["impressions"].sum()
             zero_imp = zero_imp[zero_imp == 0]
