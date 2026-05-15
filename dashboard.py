@@ -659,10 +659,10 @@ with tab_seller:
             m1, m2, m3, m4, m5, m6 = st.columns(6)
             m1.metric("Impressions", f"{int(total_impr):,}")
             m2.metric("Revenue", f"${total_rev:,.2f}")
-            m3.metric("Avg Pacing %", f"{avg_pacing:.1f}%" if avg_pacing is not None else "—")
-            m4.metric("Avg Viewability", f"{avg_viewability:.1f}%" if avg_viewability is not None else "—")
-            m5.metric("Avg VCR", f"{avg_vcr:.1f}%" if avg_vcr is not None else "—")
-            m6.metric("Avg CTR", f"{avg_ctr:.3f}%" if avg_ctr is not None else "—")
+            m3.metric("Avg Pacing %", f"{avg_pacing:.1f}%" if pd.notna(avg_pacing) else "—")
+            m4.metric("Avg Viewability", f"{avg_viewability:.1f}%" if pd.notna(avg_viewability) else "—")
+            m5.metric("Avg VCR", f"{avg_vcr:.1f}%" if pd.notna(avg_vcr) else "—")
+            m6.metric("Avg CTR", f"{avg_ctr * 100:.2f}%" if pd.notna(avg_ctr) else "—")
 
             # ---------- Pacing alerts ----------
             if "pacing_pct" in view_gam:
@@ -687,18 +687,38 @@ with tab_seller:
                     st.success(f"Over-pacing (>115%): {names}")
 
             # ---------- Campaign table ----------
+            # Remaining impressions (None when no goal is set)
+            if "impressions_goal" in view_gam.columns and "impressions_delivered" in view_gam.columns:
+                view_gam = view_gam.copy()
+                view_gam["remaining_impressions"] = view_gam.apply(
+                    lambda r: max(r["impressions_goal"] - r["impressions_delivered"], 0)
+                    if pd.notna(r["impressions_goal"]) and pd.notna(r["impressions_delivered"])
+                    else None,
+                    axis=1,
+                )
+
+            # CTR is stored as a ratio (0–1); convert to percentage for display
+            if "ad_server_ctr" in view_gam.columns:
+                view_gam = view_gam.copy()
+                view_gam["ad_server_ctr"] = view_gam["ad_server_ctr"] * 100
+
+            has_vcr = "vcr" in view_gam.columns and view_gam["vcr"].notna().any()
+
             display_cols = {
                 "line_item_name": "Line Item",
                 "order_name": "Order",
                 "seller_ae": "Seller",
                 "impressions_goal": "Goal",
                 "impressions_delivered": "Delivered",
+                "remaining_impressions": "Remaining",
                 "pacing_pct": "Pacing %",
                 "ad_server_active_view_viewable_impressions_rate": "Viewability %",
-                "vcr": "VCR %",
                 "ad_server_ctr": "CTR %",
                 "ad_server_cpm_and_cpc_revenue": "Revenue",
             }
+            if has_vcr:
+                display_cols["vcr"] = "VCR %"
+
             available_cols = [c for c in display_cols if c in view_gam.columns]
             table_df = (
                 view_gam[available_cols]
@@ -712,14 +732,16 @@ with tab_seller:
                 col_config["Goal"] = st.column_config.NumberColumn(format="localized")
             if "Delivered" in table_df.columns:
                 col_config["Delivered"] = st.column_config.NumberColumn(format="localized")
+            if "Remaining" in table_df.columns:
+                col_config["Remaining"] = st.column_config.NumberColumn(format="localized")
             if "Pacing %" in table_df.columns:
-                col_config["Pacing %"] = st.column_config.NumberColumn(format="%.1f")
+                col_config["Pacing %"] = st.column_config.NumberColumn(format="%.1f%%")
             if "Viewability %" in table_df.columns:
                 col_config["Viewability %"] = st.column_config.NumberColumn(format="%.1f%%")
             if "VCR %" in table_df.columns:
-                col_config["VCR %"] = st.column_config.NumberColumn(format="%.1f")
+                col_config["VCR %"] = st.column_config.NumberColumn(format="%.1f%%")
             if "CTR %" in table_df.columns:
-                col_config["CTR %"] = st.column_config.NumberColumn(format="%.3f")
+                col_config["CTR %"] = st.column_config.NumberColumn(format="%.2f%%")
             if "Revenue" in table_df.columns:
                 col_config["Revenue"] = st.column_config.NumberColumn(format="dollar")
 
