@@ -810,13 +810,21 @@ with tab_seller:
             if "Revenue" in table_df.columns:
                 col_config["Revenue"] = st.column_config.NumberColumn(format="dollar")
 
+            styled_df = table_df.style
             if "Viewability %" in table_df.columns:
-                styled_df = table_df.style.map(
+                styled_df = styled_df.map(
                     lambda v: "color: red" if isinstance(v, (int, float)) and not pd.isna(v) and v < 70 else "",
                     subset=["Viewability %"],
                 )
-            else:
-                styled_df = table_df.style
+            if "Pacing %" in table_df.columns:
+                def _pacing_color(v):
+                    if not isinstance(v, (int, float)) or pd.isna(v):
+                        return ""
+                    if v >= 100:
+                        return "color: hsl(120, 60%, 35%)"
+                    hue = int(max(0.0, v) / 100.0 * 120)
+                    return f"color: hsl({hue}, 70%, 38%)"
+                styled_df = styled_df.map(_pacing_color, subset=["Pacing %"])
 
             st.dataframe(
                 styled_df,
