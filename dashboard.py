@@ -633,14 +633,32 @@ with tab_seller:
             .map(AE_NAMES)
         )
 
-        sellers = sorted(gam_df["seller_ae"].dropna().unique())
-        selected_seller = st.selectbox(
-            "Seller",
-            options=["All"] + sellers,
-            key="seller_select",
+        # Extract advertiser from line item name (index 7 in Newsweek taxonomy)
+        gam_df["advertiser"] = gam_df["line_item_name"].apply(
+            lambda name: parts[7].strip()
+            if isinstance(name, str) and len(parts := name.split("_")) > 7
+            else None
         )
 
+        f1, f2 = st.columns(2)
+        with f1:
+            sellers = sorted(gam_df["seller_ae"].dropna().unique())
+            selected_seller = st.selectbox(
+                "Seller",
+                options=["All"] + sellers,
+                key="seller_select",
+            )
+        with f2:
+            advertiser_opts = sorted(gam_df["advertiser"].dropna().unique())
+            selected_advertisers = st.multiselect(
+                "Advertiser",
+                options=advertiser_opts,
+                key="gam_advertiser_filter",
+            )
+
         view_gam = gam_df if selected_seller == "All" else gam_df[gam_df["seller_ae"] == selected_seller].copy()
+        if selected_advertisers:
+            view_gam = view_gam[view_gam["advertiser"].isin(selected_advertisers)]
 
         if view_gam.empty:
             st.info("No campaigns found for the selected seller.")
@@ -717,6 +735,7 @@ with tab_seller:
                 "line_item_name": "Line Item",
                 "order_name": "Order",
                 "seller_ae": "Seller",
+                "advertiser": "Advertiser",
                 "ad_format": "Format",
                 "impressions_goal": "Goal",
                 "impressions_delivered": "Delivered",
