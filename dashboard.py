@@ -755,7 +755,7 @@ with tab_seller:
                 col_config["Revenue"] = st.column_config.NumberColumn(format="dollar")
 
             st.dataframe(
-                table_df.fillna("N/A"),
+                table_df,
                 use_container_width=True,
                 hide_index=True,
                 column_config=col_config,
