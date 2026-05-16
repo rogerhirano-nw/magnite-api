@@ -1276,8 +1276,8 @@ with tab_seller:
                             "total_requests": "Total Requests",
                             "non_zero_bid_responses": "Bid Responses",
                         })
-            except Exception:
-                pass
+            except Exception as _mag_exc:
+                st.warning(f"Magnite PMP load error: {_mag_exc}")
 
         # Generic loader for any custom SSP added via the Settings tab
         _custom_summaries = []
