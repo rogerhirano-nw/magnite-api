@@ -1930,6 +1930,7 @@ with tab_settings:
                 "deal_type_codes": _new_dt, "deal_type_aliases": _new_aliases,
                 "dsp_aliases": _new_dsp_aliases, "direct_sources": _new_direct,
             })
+            st.cache_data.clear()
             st.success("Settings saved — reloading dashboard…")
             st.rerun()
         except Exception as _e:
