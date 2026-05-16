@@ -144,6 +144,15 @@ def refresh_gam() -> int:
         df.to_sql(table, conn, if_exists="append", index=False)
 
     logger.info("Wrote %d rows to %s", len(df), table)
+
+    # Diagnostic: log every distinct order name prefix so we can find PA line items.
+    if "order_name" in df.columns:
+        order_names = sorted(df["order_name"].dropna().unique().tolist())
+        logger.info("GAM distinct order names (%d): %s", len(order_names), order_names)
+    if "line_item_name" in df.columns:
+        prefixes = sorted({n[:20] for n in df["line_item_name"].dropna().unique()})
+        logger.info("GAM line_item_name prefixes (first 20 chars, %d unique): %s", len(prefixes), prefixes)
+
     return len(df)
 
 
