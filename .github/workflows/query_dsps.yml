@@ -1,0 +1,30 @@
+name: Query unique DSP values
+on: [workflow_dispatch]
+jobs:
+  query:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install sqlalchemy psycopg2-binary
+      - name: Print unique DSP values from all SSP tables
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python - <<'PYEOF'
+          import os, sqlalchemy
+          engine = sqlalchemy.create_engine(os.environ["DATABASE_URL"])
+          with engine.connect() as conn:
+              for table, col in [("gam_pmp_deals", "dsp"), ("magnite_deal_daily", "partner"), ("pubmatic_deals", "dsp")]:
+                  try:
+                      rows = conn.execute(sqlalchemy.text(
+                          f'SELECT DISTINCT "{col}" FROM "{table}" WHERE "{col}" IS NOT NULL AND TRIM(CAST("{col}" AS TEXT)) != \'\' ORDER BY "{col}"'
+                      )).fetchall()
+                      print(f"\n=== {table}.{col} ({len(rows)} unique) ===")
+                      for r in rows:
+                          print(f"  {r[0]!r}")
+                  except Exception as e:
+                      print(f"\n=== {table}.{col} ERROR: {e}")
+          PYEOF
