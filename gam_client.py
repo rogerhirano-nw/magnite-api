@@ -184,7 +184,7 @@ class GAMClient:
                 "AD_SERVER_IMPRESSIONS",
                 "AD_SERVER_CLICKS",
                 "AD_SERVER_CTR",
-                "AD_SERVER_GROSS_REVENUE",
+                "AD_SERVER_REVENUE",
                 "AD_SERVER_AVERAGE_ECPM",
                 "AD_SERVER_ACTIVE_VIEW_VIEWABLE_IMPRESSIONS",
                 "AD_SERVER_ACTIVE_VIEW_VIEWABLE_IMPRESSIONS_RATE",
@@ -195,8 +195,7 @@ class GAMClient:
             start_date=start_date,
             end_date=end_date,
         )
-        # Keep column name consistent with downstream code
-        df = df.rename(columns={"ad_server_gross_revenue": "ad_server_cpm_and_cpc_revenue"})
+        df = df.rename(columns={"ad_server_revenue": "ad_server_cpm_and_cpc_revenue"})
         return df
 
     # ------------------------------------------------------------------
@@ -219,7 +218,7 @@ class GAMClient:
             ],
             metrics=[
                 "AD_SERVER_IMPRESSIONS",
-                "AD_SERVER_GROSS_REVENUE",
+                "AD_SERVER_REVENUE",
                 "AD_SERVER_AVERAGE_ECPM",
             ],
             start_date=start_date,
@@ -230,7 +229,7 @@ class GAMClient:
         df = df.rename(columns={
             "deal_name": "programmatic_deal_name",
             "deal_id": "programmatic_deal_id",
-            "ad_server_gross_revenue": "ad_server_cpm_and_cpc_revenue",
+            "ad_server_revenue": "ad_server_cpm_and_cpc_revenue",
         })
 
         if "programmatic_deal_name" in df.columns:
