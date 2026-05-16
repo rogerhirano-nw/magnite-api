@@ -13,13 +13,21 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import altair as alt
 import pandas as pd
 import sqlalchemy
 import streamlit as st
+
+def _engine() -> sqlalchemy.Engine:
+    try:
+        url = st.secrets["DATABASE_URL"]
+    except Exception:
+        url = os.environ.get("DATABASE_URL", "")
+    return sqlalchemy.create_engine(url)
+
 
 # ── Settings ─────────────────────────────────────────────────────────────────
 
@@ -78,6 +86,17 @@ _DEFAULT_SETTINGS: dict = {
 
 
 def _load_settings() -> dict:
+    # Primary: database (survives redeployments on Streamlit Cloud)
+    try:
+        with _engine().connect() as conn:
+            row = conn.execute(
+                sqlalchemy.text("SELECT value FROM dashboard_settings WHERE key = 'main'")
+            ).fetchone()
+            if row:
+                return json.loads(row[0])
+    except Exception:
+        pass
+    # Fallback: local file (useful for first-run and local dev)
     if _SETTINGS_PATH.exists():
         try:
             with open(_SETTINGS_PATH) as f:
@@ -88,21 +107,34 @@ def _load_settings() -> dict:
 
 
 def _save_settings(data: dict) -> None:
-    with open(_SETTINGS_PATH, "w") as f:
-        json.dump(data, f, indent=2)
+    json_str = json.dumps(data, indent=2)
+    now = datetime.now(timezone.utc).isoformat()
+    # Write to database so changes survive redeployments
+    with _engine().begin() as conn:
+        conn.execute(sqlalchemy.text("""
+            CREATE TABLE IF NOT EXISTS dashboard_settings (
+                key        TEXT PRIMARY KEY,
+                value      TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """))
+        conn.execute(sqlalchemy.text(
+            "DELETE FROM dashboard_settings WHERE key = 'main'"
+        ))
+        conn.execute(sqlalchemy.text(
+            "INSERT INTO dashboard_settings (key, value, updated_at) VALUES ('main', :v, :t)"
+        ), {"v": json_str, "t": now})
+    # Also write locally so file stays in sync for dev
+    try:
+        with open(_SETTINGS_PATH, "w") as f:
+            f.write(json_str)
+    except Exception:
+        pass
     st.cache_data.clear()
 
 
 _cfg = _load_settings()
 _ssp_enabled: dict[str, bool] = {s["name"]: s.get("enabled", True) for s in _cfg["ssps"]}
-
-
-def _engine() -> sqlalchemy.Engine:
-    try:
-        url = st.secrets["DATABASE_URL"]
-    except Exception:
-        url = os.environ.get("DATABASE_URL", "")
-    return sqlalchemy.create_engine(url)
 
 
 PRESETS = ["Year to date", "Month to date", "Last quarter", "Last 7 days", "Yesterday", "Custom"]
