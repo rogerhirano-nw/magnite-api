@@ -1159,8 +1159,8 @@ with tab_seller:
                             return "Preferred Deal"
                         if lt == "PROGRAMMATIC_GUARANTEED":
                             return "Programmatic Guaranteed"
-                        # Private Auction: AdX line item following Newsweek_PA_ naming
-                        if lt == "AD_EXCHANGE":
+                        # Private Auction: PRICE_PRIORITY (or AD_EXCHANGE) with PA naming
+                        if lt in ("PRICE_PRIORITY", "AD_EXCHANGE"):
                             parsed = _parse_deal(str(row.get("order_name", "") or ""))["deal_type_label"]
                             if parsed == "Private Auction":
                                 return "Private Auction"
