@@ -67,13 +67,13 @@ _SETTINGS_PATH = Path(__file__).parent / "settings.json"
 _DEFAULT_SETTINGS: dict = {
     "ssps": [
         {
-            "name": "GAM", "enabled": True, "table": "gam_campaigns",
+            "name": "GAM", "enabled": True, "table": "gam_pmp_deals",
             "deal_types": ["Private Auction", "Preferred Deal", "Programmatic Guaranteed"],
             "columns": {
-                "Deal": "order_name", "Deal Type": "[auto]", "DSP": "",
-                "Format": "[auto]", "Seller": "salesperson",
-                "Paid Impressions": "lifetime_impressions_delivered",
-                "Revenue": "ad_server_cpm_and_cpc_revenue", "eCPM": "cpm_rate",
+                "Deal": "programmatic_deal_name", "Deal Type": "[auto]", "DSP": "dsp",
+                "Format": "ad_format", "Seller": "[auto]",
+                "Paid Impressions": "ad_server_impressions",
+                "Revenue": "ad_server_cpm_and_cpc_revenue", "eCPM": "ad_server_average_ecpm",
                 "Win Rate %": "", "Total Requests": "", "Bid Responses": "",
             },
         },
@@ -1138,28 +1138,25 @@ with tab_seller:
 
     # Add GAM PA / PD / PG deals from the dedicated gam_pmp_deals table
     _gam_summary = pd.DataFrame()
-    _gam_cfg_deal_types = next((s["deal_types"] for s in _cfg["ssps"] if s["name"] == "GAM"), [])
+    _gam_ssp_cfg  = next((s for s in _cfg["ssps"] if s["name"] == "GAM"), {})
+    _gam_col_map  = _gam_ssp_cfg.get("columns", {})
+    _gam_cfg_deal_types = _gam_ssp_cfg.get("deal_types", [])
     _gam_deal_types = [t for t in (sel_pmp_deal_types or _gam_cfg_deal_types) if t in _gam_cfg_deal_types]
     if _gam_deal_types and _ssp_enabled.get("GAM", True):
         try:
             _gam_raw = load("gam_pmp_deals").copy()
-            # Identify the deal name column (DEAL_NAME → deal_name after snake_case)
             _deal_col = next((c for c in _gam_raw.columns if "deal_name" in c or c == "deal"), None)
             if not _gam_raw.empty and _deal_col:
                 _gam_raw = _gam_raw.rename(columns={_deal_col: "deal_name"})
 
-                # Use programmatic_channel_name directly when available (REST API provides it).
-                # Fall back to _parse_deal() for manually uploaded rows.
+                # Deal Type: use channel column mapped through settings aliases; fall back to _parse_deal()
                 _ch_col = next((c for c in _gam_raw.columns if "channel" in c.lower()), None)
-                # Build normalization map from settings: canonical values map to themselves,
-                # aliases (e.g. API variants like "Preferred Deals") map to canonical.
                 _canonical_types = set(_cfg.get("deal_type_codes", {}).values())
                 _channel_map = {dt: dt for dt in _canonical_types}
                 _channel_map.update(_cfg.get("deal_type_aliases", {}))
                 if _ch_col:
                     _gam_raw["deal_type_label"] = (
-                        _gam_raw[_ch_col]
-                        .map(_channel_map)
+                        _gam_raw[_ch_col].map(_channel_map)
                         .fillna(_gam_raw["deal_name"].apply(
                             lambda d: _parse_deal(str(d) if pd.notna(d) else "")["deal_type_label"]
                         ))
@@ -1168,48 +1165,39 @@ with tab_seller:
                     _gam_raw["deal_type_label"] = _gam_raw["deal_name"].apply(
                         lambda d: _parse_deal(str(d) if pd.notna(d) else "")["deal_type_label"]
                     )
-                # Prefer API-supplied format; fall back to deal-name scanning
-                if "ad_format" not in _gam_raw.columns or _gam_raw["ad_format"].isna().all():
-                    _gam_raw["ad_format"] = _gam_raw["deal_name"].apply(
-                        lambda d: _parse_deal(str(d) if pd.notna(d) else "")["ad_format"]
+
+                def _with_fallback(df, col_cfg, parse_key):
+                    """Use settings-mapped column when valid; fall back to _parse_deal()."""
+                    _auto = df["deal_name"].apply(
+                        lambda d: _parse_deal(str(d) if pd.notna(d) else "")[parse_key]
                     )
+                    if col_cfg in ("[auto]", "N/A", "", None) or col_cfg not in df.columns:
+                        return _auto
+                    _from_api = df[col_cfg].astype(str).str.strip().replace("", None)
+                    return _from_api.where(_from_api.notna(), _auto)
+
+                _gam_raw["ad_format"] = _with_fallback(_gam_raw, _gam_col_map.get("Format", "[auto]"), "ad_format")
+                _gam_raw["dsp"]       = _with_fallback(_gam_raw, _gam_col_map.get("DSP", ""),       "dsp")
+
+                _seller_cfg = _gam_col_map.get("Seller", "[auto]")
+                if _seller_cfg not in ("[auto]", "N/A", "", None) and _seller_cfg in _gam_raw.columns:
+                    _gam_raw["seller_ae"] = _gam_raw[_seller_cfg].map(AE_NAMES)
                 else:
-                    _gam_raw["ad_format"] = _gam_raw["ad_format"].where(
-                        _gam_raw["ad_format"].notna() & (_gam_raw["ad_format"].astype(str).str.strip() != ""),
-                        _gam_raw["deal_name"].apply(
-                            lambda d: _parse_deal(str(d) if pd.notna(d) else "")["ad_format"]
-                        )
+                    _gam_raw["seller_ae"] = (
+                        _gam_raw["deal_name"]
+                        .str.extract(r"Team-(?:USA|INTL)_([A-Za-z]+)", expand=False)
+                        .map(AE_NAMES)
                     )
-                # Prefer API-supplied buyer name; fall back to deal-name position 4
-                if "dsp" not in _gam_raw.columns or _gam_raw["dsp"].isna().all():
-                    _gam_raw["dsp"] = _gam_raw["deal_name"].apply(
-                        lambda d: _parse_deal(str(d) if pd.notna(d) else "")["dsp"]
-                    )
-                else:
-                    _gam_raw["dsp"] = _gam_raw["dsp"].where(
-                        _gam_raw["dsp"].notna() & (_gam_raw["dsp"].astype(str).str.strip() != ""),
-                        _gam_raw["deal_name"].apply(
-                            lambda d: _parse_deal(str(d) if pd.notna(d) else "")["dsp"]
-                        )
-                    )
-                _gam_raw["seller_ae"] = (
-                    _gam_raw["deal_name"]
-                    .str.extract(r"Team-(?:USA|INTL)_([A-Za-z]+)", expand=False)
-                    .map(AE_NAMES)
-                )
+
                 _gam_deals = _gam_raw[_gam_raw["deal_type_label"].isin(_gam_deal_types)].copy()
                 if selected_seller != "All":
                     _gam_deals = _gam_deals[_gam_deals["seller_ae"] == selected_seller]
-                for _col in ("ad_server_impressions", "ad_server_cpm_and_cpc_revenue", "ad_server_average_ecpm"):
-                    if _col in _gam_deals.columns:
-                        _gam_deals[_col] = pd.to_numeric(_gam_deals[_col], errors="coerce")
                 if sel_pmp_deal_types:
                     _gam_deals = _gam_deals[_gam_deals["deal_type_label"].isin(sel_pmp_deal_types)]
                 if not _gam_deals.empty:
-                    # Support both API column names and uploaded report column names
-                    _rev_col  = next((c for c in ("revenue", "ad_server_cpm_and_cpc_revenue") if c in _gam_deals.columns), None)
-                    _imp_col  = next((c for c in ("impressions", "ad_server_impressions") if c in _gam_deals.columns), None)
-                    _ecpm_col = next((c for c in ("ecpm", "ad_server_average_ecpm") if c in _gam_deals.columns), None)
+                    _rev_col  = next((c for c in (_gam_col_map.get("Revenue", ""), "ad_server_cpm_and_cpc_revenue", "revenue") if c and c in _gam_deals.columns), None)
+                    _imp_col  = next((c for c in (_gam_col_map.get("Paid Impressions", ""), "ad_server_impressions", "impressions") if c and c in _gam_deals.columns), None)
+                    _ecpm_col = next((c for c in (_gam_col_map.get("eCPM", ""), "ad_server_average_ecpm", "ecpm") if c and c in _gam_deals.columns), None)
                     for _c in (_rev_col, _imp_col, _ecpm_col):
                         if _c:
                             _gam_deals[_c] = pd.to_numeric(_gam_deals[_c], errors="coerce")
@@ -1227,14 +1215,9 @@ with tab_seller:
                     _gam_agg["Total Requests"] = None
                     _gam_agg["Bid Responses"] = None
                     _gam_summary = _gam_agg.rename(columns={
-                        "seller_ae": "Seller",
-                        "deal_name": "Deal",
-                        "deal_type_label": "Deal Type",
-                        "ad_format": "Format",
-                        "dsp": "DSP",
-                        "paid_impressions": "Paid Impressions",
-                        "revenue": "Revenue",
-                        "ecpm": "eCPM",
+                        "seller_ae": "Seller", "deal_name": "Deal",
+                        "deal_type_label": "Deal Type", "ad_format": "Format", "dsp": "DSP",
+                        "paid_impressions": "Paid Impressions", "revenue": "Revenue", "ecpm": "eCPM",
                     })
         except Exception:
             pass
