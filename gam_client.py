@@ -165,6 +165,11 @@ class GAMClient:
             records.append(d_vals + m_vals)
 
         df = pd.DataFrame(records, columns=col_names)
+
+        # REST API returns DATE dimension as an integer (YYYYMMDD). Convert to string.
+        if "date" in df.columns and pd.api.types.is_integer_dtype(df["date"]):
+            df["date"] = pd.to_datetime(df["date"].astype(str), format="%Y%m%d").dt.strftime("%Y-%m-%d")
+
         logger.info("GAM report: %d rows, columns=%s", len(df), list(df.columns))
         return df
 
