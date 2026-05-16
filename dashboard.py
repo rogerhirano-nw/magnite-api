@@ -113,6 +113,11 @@ _DEFAULT_SETTINGS: dict = {
         "PA": "Private Auction", "PD": "Preferred Deal",
         "PG": "Programmatic Guaranteed", "PMP": "Private Marketplace",
     },
+    "dsp_aliases": {
+        "Amazon DSP": "Amazon",
+        "BasisTechnologies": "Basis",
+        "Basis Technologies": "Basis",
+    },
     "deal_type_aliases": {
         "Preferred Deals": "Preferred Deal",
         "Programmatic Guaranteed Deal": "Programmatic Guaranteed",
@@ -1341,6 +1346,11 @@ with tab_seller:
                                               "Paid Impressions", "Revenue", "eCPM",
                                               "Win Rate %", "Total Requests", "Bid Responses"])
 
+    # Normalize DSP names across all SSPs using the settings alias map
+    _dsp_aliases = _cfg.get("dsp_aliases", {})
+    if _dsp_aliases and "DSP" in combined_pmp.columns:
+        combined_pmp["DSP"] = combined_pmp["DSP"].replace(_dsp_aliases)
+
     # Persist DSP / Format options for next render (two-pass pattern — filters are rendered above).
     st.session_state["_pmp_dsps_opts"]    = sorted(combined_pmp["DSP"].dropna().unique().tolist())
     st.session_state["_pmp_formats_opts"] = sorted(combined_pmp["Format"].dropna().unique().tolist())
@@ -1575,7 +1585,31 @@ with tab_settings:
         },
     )
 
-    # ── Section 4: Direct Campaign Sources ──────────────────────────────
+    # ── Section 4: DSP Name Aliases ─────────────────────────────────────
+    st.markdown("#### DSP Name Aliases")
+    st.caption(
+        "Normalize DSP names that appear under multiple spellings across SSPs. "
+        "Applied globally after combining Magnite, GAM, and Pubmatic data."
+    )
+    _dsp_alias_rows = [
+        {"Raw Value": k, "Canonical DSP Name": v}
+        for k, v in _s.get("dsp_aliases", {}).items()
+    ]
+    _dsp_alias_edit = st.data_editor(
+        pd.DataFrame(_dsp_alias_rows) if _dsp_alias_rows else pd.DataFrame(
+            columns=["Raw Value", "Canonical DSP Name"]
+        ),
+        use_container_width=True,
+        hide_index=True,
+        num_rows="dynamic",
+        key="settings_dsp_aliases",
+        column_config={
+            "Raw Value":         st.column_config.TextColumn("Raw Value", help="Exact string as it appears in the data", required=True),
+            "Canonical DSP Name": st.column_config.TextColumn("Canonical DSP Name", help="Preferred display name", required=True),
+        },
+    )
+
+    # ── Section 5: Direct Campaign Sources ──────────────────────────────
     st.markdown("#### Direct Campaign Sources")
     st.caption(
         "Each row is a direct-sold data source. **Line Item Prefix** filters the table to only direct campaigns. "
@@ -1858,11 +1892,17 @@ with tab_settings:
                 if pd.notna(r.get("Raw Value")) and str(r["Raw Value"]).strip()
                 and pd.notna(r.get("Canonical Deal Type")) and str(r["Canonical Deal Type"]).strip()
             }
+            _new_dsp_aliases = {
+                str(r["Raw Value"]).strip(): str(r["Canonical DSP Name"]).strip()
+                for _, r in _dsp_alias_edit.iterrows()
+                if pd.notna(r.get("Raw Value")) and str(r["Raw Value"]).strip()
+                and pd.notna(r.get("Canonical DSP Name")) and str(r["Canonical DSP Name"]).strip()
+            }
 
             _save_settings({
                 "ssps": _new_ssps, "ae_names": _new_ae,
                 "deal_type_codes": _new_dt, "deal_type_aliases": _new_aliases,
-                "direct_sources": _new_direct,
+                "dsp_aliases": _new_dsp_aliases, "direct_sources": _new_direct,
             })
             st.success("Settings saved — reloading dashboard…")
             st.rerun()
