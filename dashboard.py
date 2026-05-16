@@ -943,28 +943,6 @@ with tab_seller:
             m5.metric("Avg VCR", f"{avg_vcr:.1f}%" if pd.notna(avg_vcr) else "—")
             m6.metric("Avg CTR", f"{avg_ctr * 100:.2f}%" if pd.notna(avg_ctr) else "—")
 
-            # ---------- Pacing alerts ----------
-            if "pacing_pct" in view_gam:
-                under_pacing = view_gam[view_gam["pacing_pct"] < 85][
-                    ["line_item_name", "order_name", "pacing_pct"]
-                ].drop_duplicates("line_item_name")
-                over_pacing = view_gam[view_gam["pacing_pct"] > 115][
-                    ["line_item_name", "order_name", "pacing_pct"]
-                ].drop_duplicates("line_item_name")
-
-                if not under_pacing.empty:
-                    names = ", ".join(
-                        f"{r['line_item_name']} ({r['pacing_pct']:.0f}%)"
-                        for _, r in under_pacing.iterrows()
-                    )
-                    st.warning(f"Under-pacing (<85%): {names}")
-                if not over_pacing.empty:
-                    names = ", ".join(
-                        f"{r['line_item_name']} ({r['pacing_pct']:.0f}%)"
-                        for _, r in over_pacing.iterrows()
-                    )
-                    st.success(f"Over-pacing (>115%): {names}")
-
             # ---------- Campaign table ----------
             # Remaining impressions (None when no goal is set)
             if "impressions_goal" in view_gam.columns and "lifetime_impressions_delivered" in view_gam.columns:
