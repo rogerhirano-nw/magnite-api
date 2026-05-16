@@ -143,6 +143,9 @@ _DEFAULT_SETTINGS: dict = {
         "Matterkind US Google - The Trade Desk (The Trade Desk)": "The Trade Desk",
         "Quigley Simpson - 1ufz33r (The Trade Desk)": "The Trade Desk",
         "Virtual Gaming World - 7xcsg31 (The Trade Desk)": "The Trade Desk",
+        "Tara-Group": "TaraGroup",
+        "TTD": "The Trade Desk",
+        "ZetaGlobal": "Zeta DSP",
     },
     "deal_type_aliases": {
         "Preferred Deals": "Preferred Deal",
@@ -1373,9 +1376,6 @@ with tab_seller:
         }
         if _load_errors:
             _dbg["DB LOAD ERRORS"] = _load_errors
-        _dbg["DSP aliases loaded"] = _cfg.get("dsp_aliases", {})
-        _dbg["Magnite DSP values (pre-alias)"] = _magnite_summary["DSP"].dropna().unique().tolist() if not _magnite_summary.empty else []
-        _dbg["Combined DSP values (post-alias)"] = combined_pmp["DSP"].dropna().unique().tolist() if not combined_pmp.empty else []
         st.json(_dbg)
 
     _combined_prefilter = combined_pmp.copy()
