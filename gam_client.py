@@ -111,9 +111,18 @@ class GAMClient:
                     "AD_SERVER_CLICKS",
                     "AD_SERVER_CTR",
                     "AD_SERVER_CPM_AND_CPC_REVENUE",
+                    "AD_SERVER_AVERAGE_ECPM",
+                    "AD_SERVER_ACTIVE_VIEW_VIEWABLE_IMPRESSIONS",
                     "AD_SERVER_ACTIVE_VIEW_VIEWABLE_IMPRESSIONS_RATE",
+                    "AD_SERVER_ACTIVE_VIEW_MEASURABLE_IMPRESSIONS",
+                    "AD_SERVER_ACTIVE_VIEW_MEASURABLE_IMPRESSIONS_RATE",
+                    "AD_SERVER_ACTIVE_VIEW_ELIGIBLE_IMPRESSIONS",
                     "VIDEO_INTERACTION_VIDEO_STARTS",
+                    "VIDEO_INTERACTION_VIDEO_FIRST_QUARTILE",
+                    "VIDEO_INTERACTION_VIDEO_MIDPOINT",
+                    "VIDEO_INTERACTION_VIDEO_THIRD_QUARTILE",
                     "VIDEO_INTERACTION_VIDEO_COMPLETIONS",
+                    "VIDEO_INTERACTION_VIDEO_SKIPS",
                 ],
                 "dateRangeType": "CUSTOM_DATE",
                 "startDate": self._gam_date(start_date),
@@ -161,9 +170,9 @@ class GAMClient:
         ]
 
         # GAM CSV_DUMP expresses all monetary values in micro-currency (1/1,000,000).
-        # Divide revenue column to get actual dollars.
-        if "ad_server_cpm_and_cpc_revenue" in df.columns:
-            df["ad_server_cpm_and_cpc_revenue"] = df["ad_server_cpm_and_cpc_revenue"] / 1_000_000
+        for _money_col in ("ad_server_cpm_and_cpc_revenue", "ad_server_average_ecpm"):
+            if _money_col in df.columns:
+                df[_money_col] = df[_money_col] / 1_000_000
 
         return df
 
@@ -346,15 +355,35 @@ class GAMClient:
             "ad_server_clicks": ("ad_server_clicks", "sum"),
             "ad_server_ctr": ("ad_server_ctr", "mean"),
             "ad_server_cpm_and_cpc_revenue": ("ad_server_cpm_and_cpc_revenue", "sum"),
+            "ad_server_average_ecpm": ("ad_server_average_ecpm", "mean"),
+            "ad_server_active_view_viewable_impressions": (
+                "ad_server_active_view_viewable_impressions", "sum",
+            ),
             "ad_server_active_view_viewable_impressions_rate": (
                 "ad_server_active_view_viewable_impressions_rate", "mean",
             ),
+            "ad_server_active_view_measurable_impressions": (
+                "ad_server_active_view_measurable_impressions", "sum",
+            ),
+            "ad_server_active_view_measurable_impressions_rate": (
+                "ad_server_active_view_measurable_impressions_rate", "mean",
+            ),
+            "ad_server_active_view_eligible_impressions": (
+                "ad_server_active_view_eligible_impressions", "sum",
+            ),
         }
         # Video columns are absent when there are no video line items in the period
-        if "video_interaction_video_starts" in df_delivery.columns:
-            agg_spec["video_starts"] = ("video_interaction_video_starts", "sum")
-        if "video_interaction_video_completions" in df_delivery.columns:
-            agg_spec["video_completions"] = ("video_interaction_video_completions", "sum")
+        _video_sum_cols = [
+            "video_interaction_video_starts",
+            "video_interaction_video_first_quartile",
+            "video_interaction_video_midpoint",
+            "video_interaction_video_third_quartile",
+            "video_interaction_video_completions",
+            "video_interaction_video_skips",
+        ]
+        for _vc in _video_sum_cols:
+            if _vc in df_delivery.columns:
+                agg_spec[_vc] = (_vc, "sum")
 
         agg = df_delivery.groupby("line_item_id", as_index=False).agg(**agg_spec)
 
@@ -377,11 +406,13 @@ class GAMClient:
         merged = merged.merge(agg_1d, on="line_item_id", how="left")
 
         # VCR — only computable when video columns were present in the report
-        if "video_starts" in merged.columns and "video_completions" in merged.columns:
+        _vcr_starts = "video_interaction_video_starts"
+        _vcr_completions = "video_interaction_video_completions"
+        if _vcr_starts in merged.columns and _vcr_completions in merged.columns:
             merged["vcr"] = merged.apply(
-                lambda r: (r["video_completions"] / r["video_starts"] * 100)
-                if pd.notna(r.get("video_starts")) and r.get("video_starts", 0) > 0
-                else (0.0 if pd.notna(r.get("video_starts")) else None),
+                lambda r: (r[_vcr_completions] / r[_vcr_starts] * 100)
+                if pd.notna(r.get(_vcr_starts)) and r.get(_vcr_starts, 0) > 0
+                else (0.0 if pd.notna(r.get(_vcr_starts)) else None),
                 axis=1,
             )
         else:

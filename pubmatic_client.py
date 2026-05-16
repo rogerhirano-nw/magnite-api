@@ -202,7 +202,11 @@ class PubmaticClient:
             "toDate":     end_date.strftime("%Y-%m-%dT23:59"),
             "dateUnit":   "date",
             "dimensions": "date,dealMetaId,publisherDealId,dspId,adFormatId",
-            "metrics":    "paidImpressions,revenue,ecpm,nonZeroBidResponses,winRate,totalRequests",
+            "metrics":    (
+                "paidImpressions,revenue,ecpm,nonZeroBidResponses,"
+                "winRate,totalRequests,bidRequests,bidResponses,"
+                "impressions,avgBidPrice"
+            ),
         }
 
         records = self._fetch(params)
@@ -226,6 +230,10 @@ class PubmaticClient:
             "nonZeroBidResponses":   "non_zero_bid_responses",
             "winRate":               "win_rate",
             "totalRequests":         "total_requests",
+            "bidRequests":           "bid_requests",
+            "bidResponses":          "bid_responses",
+            "impressions":           "impressions",
+            "avgBidPrice":           "avg_bid_price",
         }
         df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
         df["source"] = "pubmatic"
