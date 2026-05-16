@@ -215,12 +215,7 @@ class GAMClient:
     # ------------------------------------------------------------------
 
     def run_deals_report(self, start_date: date, end_date: date) -> pd.DataFrame:
-        """
-        Pull Preferred Deal and Programmatic Guaranteed data from the DEAL_NAME dimension.
-
-        This network has no Private Auction programmatic channel in GAM — PA deals are
-        managed through Magnite (SSP) and reported via magnite_deal_daily, not here.
-        """
+        """Pull all programmatic deals by DEAL_ID + DEAL_NAME + PROGRAMMATIC_CHANNEL_NAME."""
         df = self._run_report(
             dimensions=["DATE", "DEAL_ID", "DEAL_NAME", "PROGRAMMATIC_CHANNEL_NAME"],
             metrics=["AD_SERVER_IMPRESSIONS", "AD_SERVER_REVENUE", "AD_SERVER_AVERAGE_ECPM"],
@@ -231,12 +226,32 @@ class GAMClient:
             "deal_id": "programmatic_deal_id",
             "ad_server_revenue": "ad_server_cpm_and_cpc_revenue",
         })
+
+        # Log ALL non-zero deal IDs before any filtering so we can see every deal GAM knows about.
+        df_with_id = df[~df["programmatic_deal_id"].astype(str).str.strip().isin(["0", ""])]
+        if not df_with_id.empty:
+            summary = (
+                df_with_id.groupby(
+                    ["programmatic_channel_name", "programmatic_deal_id", "programmatic_deal_name"],
+                    dropna=False,
+                )["ad_server_impressions"]
+                .sum()
+                .reset_index()
+                .sort_values("ad_server_impressions", ascending=False)
+            )
+            logger.info(
+                "GAM ALL deals with non-zero deal_id (%d unique deals):\n%s",
+                df_with_id["programmatic_deal_id"].nunique(),
+                summary.to_string(index=False),
+            )
+
+        # Keep rows with both a real deal_id AND a real deal_name for the stored table.
         df = df[
             df["programmatic_deal_name"].notna()
             & ~df["programmatic_deal_name"].astype(str).str.strip().isin(["", "(Not applicable)"])
             & ~df["programmatic_deal_id"].astype(str).str.strip().isin(["0", ""])
         ]
-        logger.info("GAM deals report: %d rows, channels=%s",
+        logger.info("GAM deals report (named deals only): %d rows, channels=%s",
                     len(df),
                     df["programmatic_channel_name"].value_counts().to_dict() if not df.empty else {})
         return df
