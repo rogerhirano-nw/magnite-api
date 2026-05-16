@@ -1240,6 +1240,11 @@ with tab_seller:
                         _mag_df["deal"].str.extract(r"Team-(?:USA|INTL)_([A-Za-z]+)", expand=False)
                         .map(AE_NAMES)
                     )
+                    # Magnite deal API doesn't return partner/ad_format — derive from deal name.
+                    if "ad_format" not in _mag_df.columns:
+                        _mag_df["ad_format"] = _mag_df["deal"].apply(lambda d: _parse_deal(d)["ad_format"])
+                    if "partner" not in _mag_df.columns:
+                        _mag_df["partner"] = _mag_df["deal"].apply(lambda d: _parse_deal(d)["dsp"])
                     if selected_seller != "All":
                         _mag_df = _mag_df[_mag_df["seller_ae"] == selected_seller]
                     if not _mag_df.empty:
