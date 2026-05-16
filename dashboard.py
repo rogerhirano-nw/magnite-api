@@ -1345,6 +1345,8 @@ with tab_seller:
             _dbg["DB LOAD ERRORS"] = _load_errors
         st.json(_dbg)
 
+    _combined_prefilter = combined_pmp.copy()
+
     if sel_pmp_ssps:
         combined_pmp = combined_pmp[combined_pmp["SSP"].isin(sel_pmp_ssps)]
     if sel_pmp_dsps:
@@ -1353,7 +1355,24 @@ with tab_seller:
         combined_pmp = combined_pmp[combined_pmp["Format"].isin(sel_pmp_formats)]
 
     if combined_pmp.empty:
-        st.info("No PMP deal data found. Check the Debug expander above for source counts, or run a data refresh.")
+        # Give a specific reason when we can detect it.
+        if not _combined_prefilter.empty and sel_pmp_ssps:
+            # Data exists but the SSP filter excluded it — name which SSPs have matching data.
+            _has_data = _combined_prefilter.copy()
+            if sel_pmp_deal_types:
+                _has_data = _has_data[_has_data["Deal Type"].isin(sel_pmp_deal_types)]
+            _ssps_with_data = sorted(_has_data["SSP"].dropna().unique().tolist())
+            _msg = (
+                f"No data for SSP = **{', '.join(sel_pmp_ssps)}**"
+                + (f" + Deal Type = **{', '.join(sel_pmp_deal_types)}**" if sel_pmp_deal_types else "")
+                + f". Try selecting: **{', '.join(_ssps_with_data)}**." if _ssps_with_data
+                else ". No matching data exists for any SSP with the current filters."
+            )
+            st.warning(_msg)
+        elif not _combined_prefilter.empty:
+            st.warning("Filters returned no rows — try clearing the Deal Type, DSP, or Format filter.")
+        else:
+            st.info("No PMP deal data found. Run a data refresh to populate.")
     else:
         pm1, pm2, pm3 = st.columns(3)
         pm1.metric("Paid impressions", f"{combined_pmp['Paid Impressions'].sum():,.0f}")
