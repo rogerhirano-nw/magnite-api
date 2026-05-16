@@ -3,7 +3,7 @@
     {
       "name": "GAM",
       "enabled": true,
-      "table": "campaigns_gam",
+      "table": "gam_campaigns",
       "deal_types": ["Private Auction", "Preferred Deal", "Programmatic Guaranteed"],
       "columns": {
         "Deal":             "order_name",
@@ -22,7 +22,7 @@
     {
       "name": "Magnite",
       "enabled": true,
-      "table": "by_deal_daily",
+      "table": "magnite_deal_daily",
       "deal_types": ["Private Auction", "Preferred Deal", "Private Marketplace"],
       "columns": {
         "Deal":             "deal",
@@ -41,7 +41,7 @@
     {
       "name": "Pubmatic",
       "enabled": true,
-      "table": "deals_pubmatic",
+      "table": "pubmatic_deals",
       "deal_types": ["Private Auction", "Preferred Deal", "Programmatic Guaranteed", "Private Marketplace"],
       "columns": {
         "Deal":             "deal",
@@ -84,7 +84,7 @@
     {
       "name": "GAM Direct",
       "enabled": true,
-      "table": "campaigns_gam",
+      "table": "gam_campaigns",
       "line_item_prefix": "Newsweek_Direct",
       "columns": {
         "Seller":           "seller_ae",

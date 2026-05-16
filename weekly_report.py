@@ -67,7 +67,7 @@ def load_never_accepted() -> tuple[pd.DataFrame, pd.DataFrame]:
                 SUM(bid_responses) AS total_bid_responses,
                 COUNT(DISTINCT date) AS days_in_data,
                 MIN(date) AS first_seen
-            FROM by_deal_daily
+            FROM magnite_deal_daily
             WHERE deal IS NOT NULL
               AND deal != ''
               AND UPPER(TRIM(REPLACE(deal, '-', ''))) != 'NA'

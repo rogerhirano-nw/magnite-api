@@ -38,7 +38,7 @@ def _engine() -> sqlalchemy.Engine:
 # Tune these to match the dashboard's actual filter dimensions.
 # Don't grab every dim — the row count blows up fast and you'll hit the 500K cap.
 REPORTS = {
-    "by_site_size_daily": {
+    "magnite_site_daily": {
         "dimensions": ["date", "site", "size", "device_type_name_v1"],
         "metrics": [
             "ad_requests",
@@ -51,7 +51,7 @@ REPORTS = {
         ],
         "date_range": "last_7",
     },
-    "by_dsp_daily": {
+    "magnite_dsp_daily": {
         "dimensions": ["date", "partner", "site"],
         "metrics": [
             "bid_requests",
@@ -63,7 +63,7 @@ REPORTS = {
         ],
         "date_range": "last_7",
     },
-    "by_deal_daily": {
+    "magnite_deal_daily": {
         "dimensions": ["date", "deal", "deal_id", "partner", "ad_format"],
         "metrics": [
             "ad_requests",
@@ -114,10 +114,10 @@ def refresh_one_report(client: MagniteClient, table: str, config: dict) -> int:
 
 
 def refresh_gam() -> int:
-    """Pull GAM delivery + pacing for the last 7 days and write to campaigns_gam."""
+    """Pull GAM delivery + pacing for the last 7 days and write to gam_campaigns."""
     from datetime import date as _date
 
-    logger.info("Refreshing campaigns_gam (GAM)")
+    logger.info("Refreshing gam_campaigns (GAM)")
     gam = GAMClient()
 
     yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
@@ -132,7 +132,7 @@ def refresh_gam() -> int:
     df["source"] = "gam"
     df["campaign_type"] = "direct"
 
-    table = "campaigns_gam"
+    table = "gam_campaigns"
     cutoff = (datetime.now(timezone.utc) - timedelta(days=8)).strftime("%Y-%m-%d")
 
     with _engine().begin() as conn:
@@ -153,8 +153,8 @@ def refresh_gam() -> int:
 
 
 def refresh_pubmatic() -> int:
-    """Pull Pubmatic PMP deal data for the last 7 days and write to deals_pubmatic."""
-    logger.info("Refreshing deals_pubmatic (Pubmatic)")
+    """Pull Pubmatic PMP deal data for the last 7 days and write to pubmatic_deals."""
+    logger.info("Refreshing pubmatic_deals (Pubmatic)")
     client = PubmaticClient()
 
     yesterday      = datetime.now(timezone.utc).date() - timedelta(days=1)
@@ -167,7 +167,7 @@ def refresh_pubmatic() -> int:
 
     df["_pulled_at"] = datetime.now(timezone.utc).isoformat()
 
-    table  = "deals_pubmatic"
+    table  = "pubmatic_deals"
     cutoff = (datetime.now(timezone.utc) - timedelta(days=8)).strftime("%Y-%m-%d")
 
     with _engine().begin() as conn:
@@ -224,12 +224,12 @@ def main() -> None:
     try:
         total += refresh_gam()
     except Exception:
-        logger.exception("Refresh failed for campaigns_gam — continuing")
+        logger.exception("Refresh failed for gam_campaigns — continuing")
 
     try:
         total += refresh_pubmatic()
     except Exception:
-        logger.exception("Refresh failed for deals_pubmatic — continuing")
+        logger.exception("Refresh failed for pubmatic_deals — continuing")
 
 
 if __name__ == "__main__":

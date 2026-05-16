@@ -51,7 +51,7 @@ _SETTINGS_PATH = Path(__file__).parent / "settings.json"
 _DEFAULT_SETTINGS: dict = {
     "ssps": [
         {
-            "name": "GAM", "enabled": True, "table": "campaigns_gam",
+            "name": "GAM", "enabled": True, "table": "gam_campaigns",
             "deal_types": ["Private Auction", "Preferred Deal", "Programmatic Guaranteed"],
             "columns": {
                 "Deal": "order_name", "Deal Type": "[auto]", "DSP": "",
@@ -62,7 +62,7 @@ _DEFAULT_SETTINGS: dict = {
             },
         },
         {
-            "name": "Magnite", "enabled": True, "table": "by_deal_daily",
+            "name": "Magnite", "enabled": True, "table": "magnite_deal_daily",
             "deal_types": ["Private Auction", "Preferred Deal", "Private Marketplace"],
             "columns": {
                 "Deal": "deal", "Deal Type": "[auto]", "DSP": "partner",
@@ -74,7 +74,7 @@ _DEFAULT_SETTINGS: dict = {
             },
         },
         {
-            "name": "Pubmatic", "enabled": True, "table": "deals_pubmatic",
+            "name": "Pubmatic", "enabled": True, "table": "pubmatic_deals",
             "deal_types": ["Private Auction", "Preferred Deal", "Programmatic Guaranteed", "Private Marketplace"],
             "columns": {
                 "Deal": "deal", "Deal Type": "[auto]", "DSP": "dsp",
@@ -101,7 +101,7 @@ _DEFAULT_SETTINGS: dict = {
         {
             "name": "GAM Direct",
             "enabled": True,
-            "table": "campaigns_gam",
+            "table": "gam_campaigns",
             "line_item_prefix": "Newsweek_Direct",
             "columns": {
                 "Seller":        "seller_ae",
@@ -290,7 +290,7 @@ tab_seller, tab_site, tab_dsp, tab_deal, tab_pubmatic, tab_settings = st.tabs([
 ])
 
 with tab_site:
-    df = load("by_site_size_daily")
+    df = load("magnite_site_daily")
     if df.empty:
         st.info("No data yet.")
     else:
@@ -366,7 +366,7 @@ with tab_site:
         )
 
 with tab_deal:
-    df = load("by_deal_daily")
+    df = load("magnite_deal_daily")
     if df.empty:
         st.info("No data yet.")
     else:
@@ -529,7 +529,7 @@ with tab_deal:
         )
 
 with tab_dsp:
-    df = load("by_dsp_daily")
+    df = load("magnite_dsp_daily")
     if df.empty:
         st.info("No data yet.")
     else:
@@ -620,9 +620,9 @@ with tab_dsp:
 
 with tab_pubmatic:
     try:
-        pm_df = load("deals_pubmatic")
+        pm_df = load("pubmatic_deals")
     except Exception:
-        st.info("No Pubmatic data yet — run refresh_cache.py to populate deals_pubmatic.")
+        st.info("No Pubmatic data yet — run refresh_cache.py to populate pubmatic_deals.")
         pm_df = pd.DataFrame()
 
     if pm_df.empty:
@@ -744,13 +744,13 @@ with tab_seller:
     st.subheader("Direct Campaigns")
 
     try:
-        gam_df = load("campaigns_gam")
+        gam_df = load("gam_campaigns")
     except Exception:
         gam_df = pd.DataFrame()
-        st.info("No GAM data yet. The campaigns_gam table will be created on the next scheduled refresh.")
+        st.info("No GAM data yet. The gam_campaigns table will be created on the next scheduled refresh.")
 
     if gam_df.empty:
-        st.info("No GAM data yet. Run refresh_cache.py to populate campaigns_gam.")
+        st.info("No GAM data yet. Run refresh_cache.py to populate gam_campaigns.")
     else:
         last_pull = gam_df["_pulled_at"].max() if "_pulled_at" in gam_df else "unknown"
         st.caption(f"Last refresh: {_fmt_last_refresh(last_pull)}")
@@ -821,7 +821,7 @@ with tab_seller:
 
         # Load Pubmatic sellers so they appear in the shared filter
         try:
-            _pmp_sellers_df = load("deals_pubmatic")
+            _pmp_sellers_df = load("pubmatic_deals")
             _pmp_sellers = (
                 _pmp_sellers_df["deal"]
                 .str.extract(r"Team-(?:USA|INTL)_([A-Za-z]+)", expand=False)
@@ -1019,10 +1019,10 @@ with tab_seller:
     st.subheader("PMP Deals")
 
     try:
-        pmp_df = load("deals_pubmatic") if _ssp_enabled.get("Pubmatic", True) else pd.DataFrame()
+        pmp_df = load("pubmatic_deals") if _ssp_enabled.get("Pubmatic", True) else pd.DataFrame()
     except Exception:
         pmp_df = pd.DataFrame()
-        st.info("No Pubmatic PMP data yet — run refresh_cache.py to populate deals_pubmatic.")
+        st.info("No Pubmatic PMP data yet — run refresh_cache.py to populate pubmatic_deals.")
 
     if pmp_df.empty:
         if _ssp_enabled.get("Pubmatic", True):
@@ -1051,7 +1051,7 @@ with tab_seller:
         )
 
         try:
-            _mag_side = load("by_deal_daily")
+            _mag_side = load("magnite_deal_daily")
             _mag_dsps = list(_mag_side["partner"].dropna().unique())
             _mag_formats = list(_mag_side["ad_format"].dropna().unique()) if "ad_format" in _mag_side.columns else []
         except Exception:
@@ -1130,7 +1130,7 @@ with tab_seller:
         _gam_deal_types = [t for t in (sel_pmp_deal_types or _gam_cfg_deal_types) if t in _gam_cfg_deal_types]
         if _gam_deal_types and _ssp_enabled.get("GAM", True):
             try:
-                _gam_raw = load("campaigns_gam").copy()
+                _gam_raw = load("gam_campaigns").copy()
                 if not _gam_raw.empty and "order_name" in _gam_raw.columns:
                     _gam_raw = _gam_raw[~_gam_raw["order_name"].str.startswith("Newsweek_Test", na=False)]
                     _order_attrs = _gam_raw["order_name"].apply(_parse_deal)
@@ -1192,7 +1192,7 @@ with tab_seller:
         _mag_types = [t for t in (sel_pmp_deal_types or _mag_cfg_deal_types) if t in _mag_cfg_deal_types]
         if _mag_types and _ssp_enabled.get("Magnite", True):
             try:
-                _mag_df = load("by_deal_daily").copy()
+                _mag_df = load("magnite_deal_daily").copy()
                 if not _mag_df.empty and "deal" in _mag_df.columns:
                     _mag_df["deal_type_label"] = _mag_df["deal"].apply(lambda d: _parse_deal(d)["deal_type_label"])
                     _mag_df = _mag_df[_mag_df["deal_type_label"].isin(_mag_types)]
@@ -1486,7 +1486,7 @@ with tab_settings:
             "Enabled":          st.column_config.CheckboxColumn("Enabled"),
             "Database Table":   st.column_config.TextColumn(
                 "Database Table",
-                help="Table populated by refresh_cache.py (e.g. campaigns_gam)",
+                help="Table populated by refresh_cache.py (e.g. gam_campaigns)",
             ),
             "Line Item Prefix": st.column_config.TextColumn(
                 "Line Item Prefix",
