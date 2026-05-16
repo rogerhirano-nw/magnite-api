@@ -1324,8 +1324,8 @@ with tab_settings:
         },
     )
 
-    # ── Section 2: Metrics Mapping ──────────────────────────────────────
-    st.markdown("#### Metrics Mapping")
+    # ── Section 2: Metrics and Dimensions Mapping ───────────────────────
+    st.markdown("#### Metrics and Dimensions Mapping")
     st.caption(
         "Each row is a canonical display field; each column is an SSP. "
         "Use the dropdown in each cell to pick the matching source column from that SSP's table. "
