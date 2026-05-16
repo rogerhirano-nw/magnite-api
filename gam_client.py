@@ -352,7 +352,7 @@ class GAMClient:
             merged["vcr"] = merged.apply(
                 lambda r: (r["video_completions"] / r["video_starts"] * 100)
                 if pd.notna(r.get("video_starts")) and r.get("video_starts", 0) > 0
-                else None,
+                else (0.0 if pd.notna(r.get("video_starts")) else None),
                 axis=1,
             )
         else:

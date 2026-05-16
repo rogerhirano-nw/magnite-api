@@ -760,7 +760,10 @@ with tab_seller:
                     view_gam = view_gam.copy()
                     view_gam[_ratio_col] = view_gam[_ratio_col] * 100
 
-            has_vcr = "vcr" in view_gam.columns and view_gam["vcr"].notna().any()
+            has_vcr = "vcr" in view_gam.columns and (
+                view_gam["vcr"].notna().any()
+                or ("ad_format" in view_gam.columns and view_gam["ad_format"].str.lower().eq("video").any())
+            )
 
             display_cols = {
                 "seller_ae": "Seller",
