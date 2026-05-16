@@ -1400,8 +1400,8 @@ with tab_settings:
         disabled=["Field"],
     )
 
-    # ── Section 3: Seller / AE Names ────────────────────────────────────
-    st.markdown("#### Seller Names")
+    # ── Section 3: Seller Mapping ────────────────────────────────────────
+    st.markdown("#### Seller Mapping")
     st.caption("Maps short AE codes (from order and deal names) to full display names.")
 
     _ae_rows = [{"Code": k, "Full Name": v} for k, v in sorted(_s["ae_names"].items())]
