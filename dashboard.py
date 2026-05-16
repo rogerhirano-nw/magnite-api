@@ -147,7 +147,10 @@ _DEFAULT_SETTINGS: dict = {
         "TTD": "The Trade Desk",
         "ZetaGlobal": "Zeta DSP",
     },
-    "format_aliases": {},
+    "format_aliases": {
+        "Banner": "Display",
+        "In-stream video": "Video",
+    },
     "deal_type_aliases": {
         "Preferred Deals": "Preferred Deal",
         "Programmatic Guaranteed Deal": "Programmatic Guaranteed",
