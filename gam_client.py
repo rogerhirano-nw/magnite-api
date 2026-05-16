@@ -216,12 +216,12 @@ class GAMClient:
 
     def run_deals_report(self, start_date: date, end_date: date) -> pd.DataFrame:
         """
-        Pull PD/PG deals (via DEAL_NAME) and PA deals (via FIRST_LOOK_PRICING_RULE_NAME),
+        Pull PD/PG deals (via DEAL_NAME) and PA deals (via LINE_ITEM_NAME pattern),
         then union them into one DataFrame for the gam_pmp_deals table.
 
-        PA deals are tracked as "First Look" pricing rules in GAM — they do NOT appear
-        under DEAL_NAME/DEAL_ID, which only covers Preferred Deal and Programmatic
-        Guaranteed.
+        GAM programmatic channels in this network: '', 'Preferred Deals', 'Programmatic
+        Guaranteed' — there is no 'Private Auction' programmatic channel. PA deals are
+        managed as direct line items named with the Newsweek_PA_* convention.
         """
         _metrics = ["AD_SERVER_IMPRESSIONS", "AD_SERVER_REVENUE", "AD_SERVER_AVERAGE_ECPM"]
 
@@ -236,47 +236,38 @@ class GAMClient:
             "deal_id": "programmatic_deal_id",
             "ad_server_revenue": "ad_server_cpm_and_cpc_revenue",
         })
-        # Drop rows with no deal name (open-exchange traffic)
         df_pd_pg = df_pd_pg[
             df_pd_pg["programmatic_deal_name"].notna()
             & ~df_pd_pg["programmatic_deal_name"].astype(str).str.strip().isin(["", "(Not applicable)"])
             & ~df_pd_pg["programmatic_deal_id"].astype(str).str.strip().isin(["0", ""])
         ]
 
-        # Diagnostic 1: all programmatic channels (no deal dimension) — tells us if PA exists at all.
-        df_channels = self._run_report(
-            dimensions=["PROGRAMMATIC_CHANNEL_NAME"],
+        # --- PA via LINE_ITEM_NAME (Newsweek_PA_* naming convention) ---
+        df_li = self._run_report(
+            dimensions=["DATE", "LINE_ITEM_ID", "LINE_ITEM_NAME", "ORDER_NAME"],
             metrics=_metrics,
             start_date=start_date,
             end_date=end_date,
         )
-        logger.info("ALL channels: %s",
-                    df_channels[["programmatic_channel_name", "ad_server_impressions"]].to_dict("records")
-                    if not df_channels.empty else [])
-
-        # Diagnostic 2: AUCTION_PACKAGE_DEAL dimension.
-        df_ap = self._run_report(
-            dimensions=["DATE", "AUCTION_PACKAGE_DEAL_ID", "AUCTION_PACKAGE_DEAL",
-                        "PROGRAMMATIC_CHANNEL_NAME"],
-            metrics=_metrics,
-            start_date=start_date,
-            end_date=end_date,
-        )
-        logger.info("AUCTION_PACKAGE rows=%d, channels=%s, names=%s",
-                    len(df_ap),
-                    df_ap["programmatic_channel_name"].value_counts().to_dict() if "programmatic_channel_name" in df_ap.columns else "?",
-                    df_ap["auction_package_deal"].dropna().unique().tolist()[:10] if "auction_package_deal" in df_ap.columns else "?")
-
-        df_pa = pd.DataFrame(columns=df_pd_pg.columns)
+        df_pa = df_li[
+            df_li["line_item_name"].str.contains(r"(?i)_PA_|_PA$|\bPA\b|private.?auction", na=False, regex=True)
+        ].copy()
+        df_pa = df_pa.rename(columns={
+            "line_item_name": "programmatic_deal_name",
+            "line_item_id": "programmatic_deal_id",
+            "ad_server_revenue": "ad_server_cpm_and_cpc_revenue",
+        })
+        df_pa["programmatic_channel_name"] = "Private Auction"
+        logger.info("PA from line items: %d rows, names=%s",
+                    len(df_pa),
+                    df_pa["programmatic_deal_name"].unique().tolist()[:10] if not df_pa.empty else [])
 
         df = pd.concat([df_pd_pg, df_pa], ignore_index=True)
-        logger.info("GAM deals report: %d PD/PG rows + %d PA (first-look) rows = %d total",
+        logger.info("GAM deals report: %d PD/PG rows + %d PA rows = %d total",
                     len(df_pd_pg), len(df_pa), len(df))
         if not df.empty:
             logger.info("GAM deals channel breakdown: %s",
                         df["programmatic_channel_name"].value_counts().to_dict())
-            logger.info("GAM deals PA sample names: %s",
-                        df_pa["programmatic_deal_name"].dropna().head(5).tolist())
         return df
 
     # ------------------------------------------------------------------
