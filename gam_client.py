@@ -243,24 +243,39 @@ class GAMClient:
             & ~df_pd_pg["programmatic_deal_id"].astype(str).str.strip().isin(["0", ""])
         ]
 
-        # --- PA via FIRST_LOOK_PRICING_RULE_NAME ---
-        df_pa = self._run_report(
+        # --- PA: try FIRST_LOOK_PRICING_RULE_NAME ---
+        df_fl_raw = self._run_report(
             dimensions=["DATE", "FIRST_LOOK_PRICING_RULE_ID", "FIRST_LOOK_PRICING_RULE_NAME",
                         "PROGRAMMATIC_CHANNEL_NAME"],
             metrics=_metrics,
             start_date=start_date,
             end_date=end_date,
-        ).rename(columns={
+        )
+        logger.info("FIRST_LOOK raw rows=%d, channel=%s, names=%s",
+                    len(df_fl_raw),
+                    df_fl_raw["programmatic_channel_name"].value_counts().to_dict() if "programmatic_channel_name" in df_fl_raw.columns else "?",
+                    df_fl_raw["first_look_pricing_rule_name"].dropna().unique().tolist()[:10] if "first_look_pricing_rule_name" in df_fl_raw.columns else "?")
+
+        df_fl_raw = df_fl_raw.rename(columns={
             "first_look_pricing_rule_name": "programmatic_deal_name",
             "first_look_pricing_rule_id": "programmatic_deal_id",
             "ad_server_revenue": "ad_server_cpm_and_cpc_revenue",
         })
-        # Drop rows with no pricing rule name
-        df_pa = df_pa[
-            df_pa["programmatic_deal_name"].notna()
-            & ~df_pa["programmatic_deal_name"].astype(str).str.strip().isin(["", "(Not applicable)"])
-            & ~df_pa["programmatic_deal_id"].astype(str).str.strip().isin(["0", ""])
-        ]
+
+        # Keep Private Auction rows even when the rule name is blank / "(Not applicable)".
+        # FIRST_LOOK rows without a name are still real PA traffic — label them "Private Auction".
+        if "programmatic_channel_name" in df_fl_raw.columns:
+            df_pa = df_fl_raw[df_fl_raw["programmatic_channel_name"] == "Private Auction"].copy()
+        else:
+            df_pa = df_fl_raw[
+                ~df_fl_raw["programmatic_deal_id"].astype(str).str.strip().isin(["0", ""])
+            ].copy()
+
+        _blank = (
+            df_pa["programmatic_deal_name"].isna()
+            | df_pa["programmatic_deal_name"].astype(str).str.strip().isin(["", "(Not applicable)"])
+        )
+        df_pa.loc[_blank, "programmatic_deal_name"] = "Private Auction"
 
         df = pd.concat([df_pd_pg, df_pa], ignore_index=True)
         logger.info("GAM deals report: %d PD/PG rows + %d PA (first-look) rows = %d total",
