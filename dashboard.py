@@ -1143,6 +1143,14 @@ with tab_seller:
             })
         )
 
+        # GAM line_item_type → canonical deal type label
+        _GAM_LI_TYPE_MAP = {
+            "PREFERRED_DEAL":           "Preferred Deal",
+            "PROGRAMMATIC_GUARANTEED":  "Programmatic Guaranteed",
+            "AD_EXCHANGE":              "Private Auction",
+            "PRICE_PRIORITY":           "Private Auction",
+        }
+
         # Add GAM PA / PD / PG deals (all managed in Google Ad Manager)
         _gam_summary = pd.DataFrame()
         _gam_cfg_deal_types = next((s["deal_types"] for s in _cfg["ssps"] if s["name"] == "GAM"), [])
@@ -1152,9 +1160,23 @@ with tab_seller:
                 _gam_raw = load("gam_campaigns").copy()
                 if not _gam_raw.empty and "order_name" in _gam_raw.columns:
                     _gam_raw = _gam_raw[~_gam_raw["order_name"].str.startswith("Newsweek_Test", na=False)]
-                    _order_attrs = _gam_raw["order_name"].apply(_parse_deal)
-                    _gam_raw["deal_type_label"] = _order_attrs.apply(lambda s: s["deal_type_label"])
-                    _gam_raw["ad_format"] = _order_attrs.apply(lambda s: s["ad_format"])
+                    # Use line_item_type if available; fall back to parsing order_name
+                    if "line_item_type" in _gam_raw.columns and _gam_raw["line_item_type"].notna().any():
+                        _gam_raw["deal_type_label"] = _gam_raw["line_item_type"].map(_GAM_LI_TYPE_MAP)
+                    else:
+                        _gam_raw["deal_type_label"] = _gam_raw["order_name"].apply(
+                            lambda d: _parse_deal(d)["deal_type_label"]
+                        )
+                    _gam_raw["ad_format"] = _gam_raw["order_name"].apply(
+                        lambda d: _parse_deal(d)["ad_format"]
+                    )
+                    # Exclude direct line items (those are shown in the Direct Campaigns table)
+                    _direct_prefix = next(
+                        (s.get("line_item_prefix", "") for s in _cfg.get("direct_sources", []) if s.get("enabled", True)),
+                        "Newsweek_Direct",
+                    )
+                    if _direct_prefix:
+                        _gam_raw = _gam_raw[~_gam_raw["line_item_name"].str.startswith(_direct_prefix, na=False)]
                     _gam_deals = _gam_raw[_gam_raw["deal_type_label"].isin(_gam_deal_types)].copy()
                     if not _gam_deals.empty:
                         _gam_deals["ssp"] = "GAM"

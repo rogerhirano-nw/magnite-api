@@ -258,6 +258,7 @@ class GAMClient:
                         "line_item_name": li.name,
                         "order_id": order_id_str,
                         "order_name": getattr(li, "orderName", None),
+                        "line_item_type": str(getattr(li, "lineItemType", "") or ""),
                         "impressions_goal": impressions_goal,
                         "cpm_rate": cpm_rate,
                         "start_date": _gam_date_to_str(getattr(li, "startDateTime", None)),
