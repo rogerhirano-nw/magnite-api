@@ -26,54 +26,57 @@ jobs:
           from gam_client import GAMClient
 
           gam = GAMClient()
-          yesterday      = date.today() - timedelta(days=1)
+          yesterday       = date.today() - timedelta(days=1)
           thirty_days_ago = yesterday - timedelta(days=29)
 
-          # Pull ALL deal data — no name filter, all channels, last 30 days
-          df = gam._run_report(
+          # ── Pull 1: PD/PG via DEAL_ID + DEAL_NAME ────────────────────
+          df_deals = gam._run_report(
               dimensions=["DATE", "DEAL_ID", "DEAL_NAME", "PROGRAMMATIC_CHANNEL_NAME"],
               metrics=["AD_SERVER_IMPRESSIONS", "AD_SERVER_REVENUE", "AD_SERVER_AVERAGE_ECPM"],
               start_date=thirty_days_ago,
               end_date=yesterday,
-          ).rename(columns={
-              "ad_server_revenue": "ad_server_cpm_and_cpc_revenue",
-          })
-
-          print(f"Total raw rows: {len(df)}")
-          print(f"Channels: {df['programmatic_channel_name'].value_counts().to_dict()}")
-
-          # All rows with any non-zero deal_id
-          all_deals = df[~df["deal_id"].astype(str).str.strip().isin(["0", ""])].copy()
-          print(f"Rows with non-zero deal_id: {len(all_deals)}")
-          print(f"Unique deal_ids: {all_deals['deal_id'].nunique()}")
-
-          # Aggregate by deal for the summary CSV
-          summary = (
-              all_deals.groupby(
-                  ["programmatic_channel_name", "deal_id", "deal_name"],
-                  dropna=False,
-              )
-              .agg(
-                  impressions=("ad_server_impressions", "sum"),
-                  revenue=("ad_server_cpm_and_cpc_revenue", "sum"),
-                  avg_ecpm=("ad_server_average_ecpm", "mean"),
-                  days_active=("date", "nunique"),
-              )
-              .reset_index()
-              .sort_values("impressions", ascending=False)
           )
+          print(f"Pull 1 (DEAL_ID+DEAL_NAME): {len(df_deals)} rows")
+          print(f"  Channels: {df_deals['programmatic_channel_name'].value_counts().to_dict()}")
 
-          summary.to_csv("gam_deals_all.csv", index=False)
-          all_deals.to_csv("gam_deals_daily.csv", index=False)
-          print("Wrote gam_deals_all.csv and gam_deals_daily.csv")
-          print(summary.to_string(index=False))
+          # ── Pull 2: PA via ORDER_NAME + DEAL_NAME ────────────────────
+          df_pa = gam._run_report(
+              dimensions=["DATE", "ORDER_NAME", "DEAL_NAME", "PROGRAMMATIC_CHANNEL_NAME"],
+              metrics=["AD_SERVER_IMPRESSIONS", "AD_SERVER_REVENUE", "AD_SERVER_AVERAGE_ECPM"],
+              start_date=thirty_days_ago,
+              end_date=yesterday,
+          )
+          print(f"\nPull 2 (ORDER_NAME+DEAL_NAME): {len(df_pa)} rows")
+          print(f"  Channels: {df_pa['programmatic_channel_name'].value_counts().to_dict()}")
+
+          pa_only = df_pa[df_pa['programmatic_channel_name'].astype(str).str.contains('rivate', case=False, na=False)]
+          print(f"  Rows containing 'rivate' in channel: {len(pa_only)}")
+          if not pa_only.empty:
+              print(pa_only[['programmatic_channel_name','order_name','deal_name','ad_server_impressions','ad_server_revenue']].to_string())
+
+          # ── Pull 3: All channels by order to find where PA revenue hides ──
+          df_order_ch = gam._run_report(
+              dimensions=["ORDER_NAME", "PROGRAMMATIC_CHANNEL_NAME"],
+              metrics=["AD_SERVER_IMPRESSIONS", "AD_SERVER_REVENUE"],
+              start_date=thirty_days_ago,
+              end_date=yesterday,
+          )
+          oe = df_order_ch[df_order_ch['order_name'].astype(str).str.contains('OpenExchange|Exchange|Open', case=False, na=False)]
+          print(f"\nPull 3 — OpenExchange order by channel:\n{oe.to_string()}")
+
+          # Write everything to CSVs
+          df_deals.to_csv("gam_deals_deal_id.csv", index=False)
+          df_pa.to_csv("gam_deals_order_name.csv", index=False)
+          df_order_ch.to_csv("gam_order_channel.csv", index=False)
+          print("\nWrote all CSVs.")
           PYEOF
 
       - name: Upload CSVs as artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gam-deals-export
+          name: gam-deals-export-v2
           path: |
-            gam_deals_all.csv
-            gam_deals_daily.csv
+            gam_deals_deal_id.csv
+            gam_deals_order_name.csv
+            gam_order_channel.csv
           retention-days: 7
