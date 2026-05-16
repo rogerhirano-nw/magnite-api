@@ -249,6 +249,12 @@ class GAMClient:
             start_date=start_date,
             end_date=end_date,
         )
+        # Log orders + sample names so we can identify the PA naming convention
+        logger.info("Delivery report order names: %s",
+                    sorted(df_li["order_name"].dropna().unique().tolist()) if not df_li.empty else [])
+        logger.info("Sample line item names (first 30): %s",
+                    df_li["line_item_name"].dropna().unique().tolist()[:30] if not df_li.empty else [])
+
         df_pa = df_li[
             df_li["line_item_name"].str.contains(r"(?i)_PA_|_PA$|\bPA\b|private.?auction", na=False, regex=True)
         ].copy()
