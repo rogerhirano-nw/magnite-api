@@ -162,18 +162,9 @@ def refresh_gam_pmp_deals() -> int:
 
     df["_pulled_at"] = datetime.now(timezone.utc).isoformat()
 
-    table  = "gam_pmp_deals"
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=8)).strftime("%Y-%m-%d")
-
+    table = "gam_pmp_deals"
     with _engine().begin() as conn:
-        if table in sa_inspect(conn).get_table_names():
-            existing_cols = {c["name"] for c in sa_inspect(conn).get_columns(table)}
-            if existing_cols != set(df.columns):
-                logger.info("Schema change detected for %s — dropping and recreating", table)
-                conn.execute(text(f'DROP TABLE "{table}"'))
-            else:
-                conn.execute(text(f'DELETE FROM "{table}" WHERE date >= :cutoff'), {"cutoff": cutoff})
-        df.to_sql(table, conn, if_exists="append", index=False)
+        df.to_sql(table, conn, if_exists="replace", index=False)
 
     logger.info("Wrote %d rows to %s", len(df), table)
     return len(df)
