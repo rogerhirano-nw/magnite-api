@@ -15,6 +15,21 @@ import json
 import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+_ET = ZoneInfo("America/New_York")
+
+
+def _fmt_last_refresh(ts: str) -> str:
+    try:
+        dt = datetime.fromisoformat(str(ts))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dt_et = dt.astimezone(_ET)
+        tz_label = "EDT" if dt_et.dst().seconds else "EST"
+        return dt_et.strftime(f"%Y-%m-%d %I:%M %p {tz_label}")
+    except Exception:
+        return str(ts)
 
 import altair as alt
 import pandas as pd
@@ -280,7 +295,7 @@ with tab_site:
         st.info("No data yet.")
     else:
         last_pull = df["_pulled_at"].max() if "_pulled_at" in df else "unknown"
-        st.caption(f"Last refresh: {last_pull}")
+        st.caption(f"Last refresh: {_fmt_last_refresh(last_pull)}")
 
         df = df.copy()
         df["date"] = pd.to_datetime(df["date"]).dt.date
@@ -356,7 +371,7 @@ with tab_deal:
         st.info("No data yet.")
     else:
         last_pull = df["_pulled_at"].max() if "_pulled_at" in df else "unknown"
-        st.caption(f"Last refresh: {last_pull}")
+        st.caption(f"Last refresh: {_fmt_last_refresh(last_pull)}")
 
         df = df.copy()
         df["date"] = pd.to_datetime(df["date"]).dt.date
@@ -519,7 +534,7 @@ with tab_dsp:
         st.info("No data yet.")
     else:
         last_pull = df["_pulled_at"].max() if "_pulled_at" in df else "unknown"
-        st.caption(f"Last refresh: {last_pull}")
+        st.caption(f"Last refresh: {_fmt_last_refresh(last_pull)}")
 
         df = df.copy()
         df["date"] = pd.to_datetime(df["date"]).dt.date
@@ -614,7 +629,7 @@ with tab_pubmatic:
         st.info("No Pubmatic data yet.")
     else:
         last_pull = pm_df["_pulled_at"].max() if "_pulled_at" in pm_df else "unknown"
-        st.caption(f"Last refresh: {last_pull}")
+        st.caption(f"Last refresh: {_fmt_last_refresh(last_pull)}")
 
         pm_df = pm_df.copy()
         pm_df["date"] = pd.to_datetime(pm_df["date"]).dt.date
@@ -738,7 +753,7 @@ with tab_seller:
         st.info("No GAM data yet. Run refresh_cache.py to populate campaigns_gam.")
     else:
         last_pull = gam_df["_pulled_at"].max() if "_pulled_at" in gam_df else "unknown"
-        st.caption(f"Last refresh: {last_pull}")
+        st.caption(f"Last refresh: {_fmt_last_refresh(last_pull)}")
 
         gam_df = gam_df.copy()
         _direct_src = next((s for s in _cfg.get("direct_sources", []) if s.get("enabled", True)), None)
@@ -752,9 +767,17 @@ with tab_seller:
 
         for numcol in ("pacing_pct", "impressions_delivered", "impressions_1d", "lifetime_impressions_delivered", "impressions_goal", "cpm_rate",
                        "ad_server_cpm_and_cpc_revenue", "ad_server_ctr",
-                       "ad_server_active_view_viewable_impressions_rate", "vcr"):
+                       "ad_server_active_view_viewable_impressions_rate", "vcr",
+                       "video_interaction_video_starts", "video_interaction_video_completions"):
             if numcol in gam_df.columns:
                 gam_df[numcol] = pd.to_numeric(gam_df[numcol], errors="coerce")
+
+        # Compute VCR from raw video columns (completions / starts × 100)
+        if "video_interaction_video_starts" in gam_df.columns and \
+                "video_interaction_video_completions" in gam_df.columns:
+            _starts = gam_df["video_interaction_video_starts"]
+            _completions = gam_df["video_interaction_video_completions"]
+            gam_df["vcr"] = (_completions / _starts * 100).where(_starts > 0)
 
         # Extract seller — prefer GAM salesperson field, fall back to name regex
         if "salesperson" in gam_df.columns and gam_df["salesperson"].notna().any():
