@@ -216,50 +216,60 @@ class GAMClient:
 
     def run_deals_report(self, start_date: date, end_date: date) -> pd.DataFrame:
         """
-        Run a GAM Historical report dimensioned by DEAL_NAME + PROGRAMMATIC_CHANNEL_NAME.
+        Pull PD/PG deals (via DEAL_NAME) and PA deals (via FIRST_LOOK_PRICING_RULE_NAME),
+        then union them into one DataFrame for the gam_pmp_deals table.
 
-        Returns one row per (date, deal) for PA/PD/PG deals.
-        Open-exchange rows (no deal name) are filtered out.
+        PA deals are tracked as "First Look" pricing rules in GAM — they do NOT appear
+        under DEAL_NAME/DEAL_ID, which only covers Preferred Deal and Programmatic
+        Guaranteed.
         """
-        df = self._run_report(
-            dimensions=[
-                "DATE",
-                "DEAL_ID",
-                "DEAL_NAME",
-                "PROGRAMMATIC_CHANNEL_NAME",
-            ],
-            metrics=[
-                "AD_SERVER_IMPRESSIONS",
-                "AD_SERVER_REVENUE",
-                "AD_SERVER_AVERAGE_ECPM",
-            ],
+        _metrics = ["AD_SERVER_IMPRESSIONS", "AD_SERVER_REVENUE", "AD_SERVER_AVERAGE_ECPM"]
+
+        # --- PD / PG via DEAL_NAME ---
+        df_pd_pg = self._run_report(
+            dimensions=["DATE", "DEAL_ID", "DEAL_NAME", "PROGRAMMATIC_CHANNEL_NAME"],
+            metrics=_metrics,
             start_date=start_date,
             end_date=end_date,
-        )
-
-        # Rename to match table schema and dashboard column detection
-        df = df.rename(columns={
+        ).rename(columns={
             "deal_name": "programmatic_deal_name",
             "deal_id": "programmatic_deal_id",
             "ad_server_revenue": "ad_server_cpm_and_cpc_revenue",
         })
+        # Drop rows with no deal name (open-exchange traffic)
+        df_pd_pg = df_pd_pg[
+            df_pd_pg["programmatic_deal_name"].notna()
+            & ~df_pd_pg["programmatic_deal_name"].astype(str).str.strip().isin(["", "(Not applicable)"])
+            & ~df_pd_pg["programmatic_deal_id"].astype(str).str.strip().isin(["0", ""])
+        ]
 
-        if "programmatic_deal_name" in df.columns:
-            df = df[
-                df["programmatic_deal_name"].notna()
-                & ~df["programmatic_deal_name"].astype(str).str.strip().isin(["", "(Not applicable)"])
-            ]
-        if "programmatic_deal_id" in df.columns:
-            df = df[~df["programmatic_deal_id"].astype(str).str.strip().isin(["0", ""])]
+        # --- PA via FIRST_LOOK_PRICING_RULE_NAME ---
+        df_pa = self._run_report(
+            dimensions=["DATE", "FIRST_LOOK_PRICING_RULE_ID", "FIRST_LOOK_PRICING_RULE_NAME",
+                        "PROGRAMMATIC_CHANNEL_NAME"],
+            metrics=_metrics,
+            start_date=start_date,
+            end_date=end_date,
+        ).rename(columns={
+            "first_look_pricing_rule_name": "programmatic_deal_name",
+            "first_look_pricing_rule_id": "programmatic_deal_id",
+            "ad_server_revenue": "ad_server_cpm_and_cpc_revenue",
+        })
+        # Drop rows with no pricing rule name
+        df_pa = df_pa[
+            df_pa["programmatic_deal_name"].notna()
+            & ~df_pa["programmatic_deal_name"].astype(str).str.strip().isin(["", "(Not applicable)"])
+            & ~df_pa["programmatic_deal_id"].astype(str).str.strip().isin(["0", ""])
+        ]
 
-        logger.info("GAM deals report: %d rows after filtering no-deal rows", len(df))
+        df = pd.concat([df_pd_pg, df_pa], ignore_index=True)
+        logger.info("GAM deals report: %d PD/PG rows + %d PA (first-look) rows = %d total",
+                    len(df_pd_pg), len(df_pa), len(df))
         if not df.empty:
             logger.info("GAM deals channel breakdown: %s",
-                        df["programmatic_channel_name"].value_counts().to_dict()
-                        if "programmatic_channel_name" in df.columns else "no channel col")
-            logger.info("GAM deals sample names: %s",
-                        df["programmatic_deal_name"].dropna().head(10).tolist()
-                        if "programmatic_deal_name" in df.columns else "no name col")
+                        df["programmatic_channel_name"].value_counts().to_dict())
+            logger.info("GAM deals PA sample names: %s",
+                        df_pa["programmatic_deal_name"].dropna().head(5).tolist())
         return df
 
     # ------------------------------------------------------------------
