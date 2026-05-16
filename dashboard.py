@@ -1417,8 +1417,8 @@ with tab_settings:
         },
     )
 
-    # ── Section 4: Deal Type Codes ───────────────────────────────────────
-    st.markdown("#### Deal Type Codes")
+    # ── Section 4: Deal Type Mapping ─────────────────────────────────────
+    st.markdown("#### Deal Type Mapping")
     st.caption("Maps abbreviations in deal/order names to display labels.")
 
     _dt_rows = [{"Code": k, "Label": v} for k, v in sorted(_s["deal_type_codes"].items())]
