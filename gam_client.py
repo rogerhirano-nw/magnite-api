@@ -275,22 +275,33 @@ class GAMClient:
     # Line items
     # ------------------------------------------------------------------
 
+    _LI_COLUMNS = [
+        "line_item_id", "line_item_name", "order_id", "order_name",
+        "line_item_type", "impressions_goal", "cpm_rate",
+        "start_date", "end_date", "status", "salesperson",
+    ]
+
     def get_active_line_items(self) -> pd.DataFrame:
         """
-        Fetch READY and DELIVERING line items with their metadata.
+        Fetch active line items with their metadata.
+
+        The REST API LineItem resource does not expose a status field,
+        so we filter by endTime >= 30 days ago to approximate active items.
 
         Returns DataFrame with: line_item_id, line_item_name, order_id,
         order_name, line_item_type, impressions_goal, cpm_rate,
         start_date, end_date, status, salesperson.
         """
+        today = date.today()
+        cutoff = (today - timedelta(days=30)).isoformat() + "T00:00:00Z"
+
         rows = []
         for li in self._li_client.list_line_items(
-            admanager_v1.ListLineItemsRequest(parent=self._parent)
+            admanager_v1.ListLineItemsRequest(
+                parent=self._parent,
+                filter=f'endTime > "{cutoff}"',
+            )
         ):
-            status = _enum_name(getattr(li, "status", "")).upper()
-            if status not in ("READY", "DELIVERING"):
-                continue
-
             # Parse numeric IDs from resource name strings
             li_id_m = re.search(r"/lineItems/(\d+)$", li.name)
             li_id = li_id_m.group(1) if li_id_m else li.name
@@ -319,11 +330,13 @@ class GAMClient:
                 "cpm_rate": cpm_rate,
                 "start_date": _ts_to_date(getattr(li, "start_time", None)),
                 "end_date": _ts_to_date(getattr(li, "end_time", None)),
-                "status": status,
+                "status": None,
                 "salesperson": None,
             })
 
-        logger.info("GAM: fetched %d active line items", len(rows))
+        logger.info("GAM: fetched %d line items (endTime > %s)", len(rows), cutoff)
+        if not rows:
+            return pd.DataFrame(columns=self._LI_COLUMNS)
         return pd.DataFrame(rows)
 
     # ------------------------------------------------------------------
