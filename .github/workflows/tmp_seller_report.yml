@@ -16,30 +16,50 @@ jobs:
         run: |
           python - <<'PYEOF'
           import os, re, sqlalchemy
-          from sqlalchemy import text
+          from sqlalchemy import text, inspect
           engine = sqlalchemy.create_engine(os.environ["DATABASE_URL"])
           with engine.connect() as conn:
-              r = conn.execute(text("""
-                  SELECT DISTINCT
-                      order_name,
-                      salesperson,
-                      COUNT(*) as line_items
-                  FROM gam_campaigns
-                  WHERE order_name LIKE 'Newsweek_Direct%'
-                  GROUP BY order_name, salesperson
-                  ORDER BY order_name
-              """))
-              rows = [dict(row._mapping) for row in r]
+              # List all tables
+              insp = inspect(engine)
+              tables = insp.get_table_names()
+              print("TABLES:", tables)
 
-          def parse(val):
-              if not isinstance(val, str) or not val.strip():
-                  return ''
-              m = re.search(r"-\s*([^-(]+?)\s*(?:\(|$)", val)
-              return m.group(1).strip() if m else val.strip()
+              # Find gam-related tables
+              gam_tables = [t for t in tables if 'gam' in t.lower() or 'campaign' in t.lower() or 'line' in t.lower()]
+              print("GAM-related tables:", gam_tables)
 
-          print("order_name,salesperson_raw,parsed_name,line_items")
-          for row in rows:
-              sp = row['salesperson'] or ''
-              parsed = parse(sp)
-              print(f'"{row["order_name"]}","{sp}","{parsed}",{row["line_items"]}')
+              # Try to query each gam table's columns
+              for tbl in gam_tables:
+                  cols = [c['name'] for c in insp.get_columns(tbl)]
+                  print(f"  {tbl}: {cols[:10]}")
+
+              # Now query the right table
+              for tbl in gam_tables:
+                  cols = [c['name'] for c in insp.get_columns(tbl)]
+                  if 'order_name' in cols and 'salesperson' in cols:
+                      print(f"\nQuerying {tbl}...")
+                      r = conn.execute(text(f"""
+                          SELECT DISTINCT
+                              order_name,
+                              salesperson,
+                              COUNT(*) as line_items
+                          FROM {tbl}
+                          WHERE order_name LIKE 'Newsweek_Direct%'
+                          GROUP BY order_name, salesperson
+                          ORDER BY order_name
+                      """))
+                      rows = [dict(row._mapping) for row in r]
+
+                      def parse(val):
+                          if not isinstance(val, str) or not val.strip():
+                              return ''
+                          m = re.search(r"-\s*([^-(]+?)\s*(?:\(|$)", val)
+                          return m.group(1).strip() if m else val.strip()
+
+                      print("order_name,salesperson_raw,parsed_name,line_items")
+                      for row in rows:
+                          sp = row['salesperson'] or ''
+                          parsed = parse(sp)
+                          print(f'"{row["order_name"]}","{sp}","{parsed}",{row["line_items"]}')
+                      break
           PYEOF
