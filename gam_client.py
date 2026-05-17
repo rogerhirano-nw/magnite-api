@@ -262,7 +262,7 @@ class GAMClient:
         start = end - timedelta(days=730)
 
         df = self._run_report(
-            dimensions=["LINE_ITEM_ID", "LINE_ITEM_COMPUTED_STATUS_NAME"],
+            dimensions=["LINE_ITEM_ID", "LINE_ITEM_COMPUTED_STATUS_NAME", "LINE_ITEM_SALESPERSON"],
             metrics=["AD_SERVER_IMPRESSIONS"],
             start_date=start,
             end_date=end,
@@ -271,6 +271,7 @@ class GAMClient:
         return df.rename(columns={
             "ad_server_impressions": "lifetime_impressions_delivered",
             "line_item_computed_status_name": "status_api",
+            "line_item_salesperson": "salesperson_api",
         })
 
     # ------------------------------------------------------------------
@@ -419,10 +420,13 @@ class GAMClient:
         merged = merged.merge(df_lifetime, on="line_item_id", how="left")
         merged = merged.merge(agg_1d, on="line_item_id", how="left")
 
-        # Replace date-derived status with the real value from the reporting API.
+        # Replace placeholders with real values from the reporting API.
         if "status_api" in merged.columns:
             merged["status"] = merged["status_api"].fillna(merged["status"])
             merged = merged.drop(columns=["status_api"])
+        if "salesperson_api" in merged.columns:
+            merged["salesperson"] = merged["salesperson_api"].fillna(merged["salesperson"])
+            merged = merged.drop(columns=["salesperson_api"])
 
         # VCR
         _vcr_starts = "video_interaction_video_starts"
