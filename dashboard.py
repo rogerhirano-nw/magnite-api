@@ -916,7 +916,7 @@ with tab_seller:
 
         all_sellers = sorted(set(gam_df["seller_ae"].dropna().unique()) | set(_pmp_sellers))
 
-        f1, f2, f3 = st.columns(3)
+        f1, f2, f3, f4 = st.columns(4)
         with f1:
             selected_seller = st.selectbox(
                 "Seller",
@@ -937,12 +937,21 @@ with tab_seller:
                 options=format_opts,
                 key="gam_format_filter",
             )
+        with f4:
+            status_opts = sorted(gam_df["status"].dropna().unique()) if "status" in gam_df.columns else []
+            selected_statuses = st.multiselect(
+                "Status",
+                options=status_opts,
+                key="gam_status_filter",
+            )
 
         view_gam = gam_df if selected_seller == "All" else gam_df[gam_df["seller_ae"] == selected_seller].copy()
         if selected_advertisers:
             view_gam = view_gam[view_gam["advertiser"].isin(selected_advertisers)]
         if selected_formats:
             view_gam = view_gam[view_gam["ad_format"].isin(selected_formats)]
+        if selected_statuses:
+            view_gam = view_gam[view_gam["status"].isin(selected_statuses)]
 
         if view_gam.empty:
             st.info("No campaigns found for the selected seller.")
