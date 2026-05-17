@@ -1143,8 +1143,11 @@ with tab_seller:
         if sel_pmp_deal_types:
             pmp_df = pmp_df[pmp_df["deal_type_label"].isin(sel_pmp_deal_types)]
         pmp_df["ssp"] = "Pubmatic"
+        _pub_grp = ["ssp", "deal_label", "deal_type_label", "ad_format", "dsp", "seller_ae"]
+        if "deal_source" in pmp_df.columns:
+            _pub_grp.append("deal_source")
         pmp_summary = (
-            pmp_df.groupby(["ssp", "deal_label", "deal_type_label", "ad_format", "dsp", "seller_ae"], dropna=False)
+            pmp_df.groupby(_pub_grp, dropna=False)
             .agg(
                 paid_impressions=("paid_impressions", "sum"),
                 revenue=("revenue", "sum"),
@@ -1157,6 +1160,7 @@ with tab_seller:
             .rename(columns={
                 "ssp": "SSP", "seller_ae": "Seller", "deal_label": "Deal",
                 "deal_type_label": "Deal Type", "ad_format": "Format", "dsp": "DSP",
+                "deal_source": "Deal Source",
                 "paid_impressions": "Paid Impressions", "revenue": "Revenue",
                 "ecpm": "eCPM", "win_rate": "Win Rate %",
                 "total_requests": "Total Requests", "non_zero_bid_responses": "Bid Responses",
@@ -1279,8 +1283,11 @@ with tab_seller:
                 if selected_seller != "All":
                     _mag_df = _mag_df[_mag_df["seller_ae"] == selected_seller]
                 if not _mag_df.empty:
+                    _mag_grp = ["ssp", "deal", "deal_type_label", "ad_format", "partner", "seller_ae"]
+                    if "revenue_source" in _mag_df.columns:
+                        _mag_grp.append("revenue_source")
                     _mag_agg = (
-                        _mag_df.groupby(["ssp", "deal", "deal_type_label", "ad_format", "partner", "seller_ae"], dropna=False)
+                        _mag_df.groupby(_mag_grp, dropna=False)
                         .agg(
                             paid_impressions=("paid_impression", "sum"),
                             revenue=("publisher_gross_revenue", "sum"),
@@ -1306,6 +1313,7 @@ with tab_seller:
                         "ecpm": "eCPM",
                         "total_requests": "Total Requests",
                         "non_zero_bid_responses": "Bid Responses",
+                        "revenue_source": "Deal Source",
                     })
         except Exception as _mag_exc:
             st.warning(f"Magnite PMP load error: {_mag_exc}")
@@ -1372,7 +1380,7 @@ with tab_seller:
         combined_pmp = pd.concat(_parts, ignore_index=True).sort_values("Revenue", ascending=False)
     else:
         combined_pmp = pd.DataFrame(columns=["SSP", "Deal", "Deal Type", "Format", "DSP", "Seller",
-                                              "Paid Impressions", "Revenue", "eCPM",
+                                              "Deal Source", "Paid Impressions", "Revenue", "eCPM",
                                               "Win Rate %", "Total Requests", "Bid Responses"])
 
     # Normalize DSP and Format names across all SSPs using the settings alias maps
