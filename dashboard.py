@@ -922,7 +922,7 @@ with tab_seller:
             return parts[idx].strip() if len(parts) > idx else None
 
         gam_df["advertiser"]    = gam_df["line_item_name"].apply(_li_part, idx=7)
-        gam_df["campaign_name"] = gam_df["line_item_name"].apply(_li_part, idx=8)
+        gam_df["campaign_name"] = gam_df["line_item_name"].apply(_li_part, idx=8).str.replace("-", " ", regex=False)
         gam_df["ad_format"]     = gam_df["line_item_name"].apply(_li_part, idx=10)
         for _col in ("advertiser", "campaign_name", "ad_format", "seller_ae"):
             if _col in gam_df.columns:
