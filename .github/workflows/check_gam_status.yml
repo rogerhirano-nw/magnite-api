@@ -1,0 +1,48 @@
+name: Check GAM status values
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install sqlalchemy psycopg2-binary
+      - name: Query status and cpm_rate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python - <<'PYEOF'
+          import os, sqlalchemy
+          from sqlalchemy import text, inspect as sa_inspect
+          engine = sqlalchemy.create_engine(os.environ["DATABASE_URL"])
+          with engine.connect() as conn:
+              cols = [c["name"] for c in sa_inspect(conn).get_columns("gam_campaigns")]
+              print("Columns:", cols)
+
+              r = conn.execute(text("""
+                  SELECT status, COUNT(*) as cnt
+                  FROM gam_campaigns
+                  GROUP BY status
+                  ORDER BY cnt DESC
+              """))
+              print("\nstatus values:")
+              for row in r:
+                  print(dict(row._mapping))
+
+              r2 = conn.execute(text("""
+                  SELECT COUNT(*) as total,
+                         COUNT(cpm_rate) as non_null_cpm,
+                         MIN(cpm_rate) as min_cpm,
+                         MAX(cpm_rate) as max_cpm
+                  FROM gam_campaigns
+              """))
+              print("\ncpm_rate stats:")
+              for row in r2:
+                  print(dict(row._mapping))
+          PYEOF
