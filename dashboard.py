@@ -108,7 +108,7 @@ _DEFAULT_SETTINGS: dict = {
         "DDivack": "Dana Divack", "DVarvaro": "Danielle Varvaro",
         "ILee": "Ivy Lee", "Ivy": "Ivy Lee", "JAmalfi": "Julie Amalfi",
         "JGentile": "Jeremy Gentile", "KWebb": "House", "RShore": "Rob Shore",
-        "SCarroll": "Summer Carroll", "THern": "Theresa Hern", "House": "House",
+        "SCarroll": "Summer Carroll", "THern": "Theresa Hern", "THearn": "Theresa Hern", "House": "House",
     },
     "deal_type_codes": {
         "PA": "Private Auction", "PD": "Preferred Deal",
@@ -199,7 +199,10 @@ _DEFAULT_SETTINGS: dict = {
 def _load_settings() -> dict:
     def _with_defaults(loaded: dict) -> dict:
         """Return loaded settings with any missing top-level keys filled from _DEFAULT_SETTINGS."""
-        return {**_DEFAULT_SETTINGS, **loaded}
+        result = {**_DEFAULT_SETTINGS, **loaded}
+        # Deep-merge ae_names so new default entries flow through even when DB has existing settings.
+        result["ae_names"] = {**_DEFAULT_SETTINGS.get("ae_names", {}), **loaded.get("ae_names", {})}
+        return result
 
     def _patch_direct_columns(cfg: dict) -> dict:
         """Add any direct_sources columns present in settings.json but absent from cfg (e.g. DB has stale copy)."""
