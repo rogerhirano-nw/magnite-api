@@ -70,6 +70,7 @@ _DEFAULT_SETTINGS: dict = {
         {
             "name": "GAM", "enabled": True, "table": "gam_pmp_deals",
             "deal_types": ["Private Auction", "Preferred Deal", "Programmatic Guaranteed"],
+            "deal_source_default": "Publisher",
             "columns": {
                 "Deal": "programmatic_deal_name", "Deal Type": "[auto]", "DSP": "dsp",
                 "Format": "ad_format", "Seller": "[auto]",
@@ -108,7 +109,10 @@ _DEFAULT_SETTINGS: dict = {
         "DDivack": "Dana Divack", "DVarvaro": "Danielle Varvaro",
         "ILee": "Ivy Lee", "Ivy": "Ivy Lee", "JAmalfi": "Julie Amalfi",
         "JGentile": "Jeremy Gentile", "KWebb": "House", "RShore": "Rob Shore",
-        "SCarroll": "Summer Carroll", "THern": "Theresa Hern", "House": "House",
+        "SCarroll": "Summer Carroll", "THern": "Theresa Hern", "THearn": "Theresa Hern", "House": "House",
+    },
+    "team_names": {
+        "USA": "USA", "INTL": "International",
     },
     "deal_type_codes": {
         "PA": "Private Auction", "PD": "Preferred Deal",
@@ -163,7 +167,7 @@ _DEFAULT_SETTINGS: dict = {
         "Programmatic Guaranteed Deal": "Programmatic Guaranteed",
         "Private Marketplace Deal": "Private Marketplace",
     },
-    "excluded_advertiser_patterns": [r"\[nw\]"],
+    "included_order_patterns": ["Newsweek_Direct%"],
     "default_statuses": ["Delivering", "Upcoming"],
     "direct_sources": [
         {
@@ -199,7 +203,11 @@ _DEFAULT_SETTINGS: dict = {
 def _load_settings() -> dict:
     def _with_defaults(loaded: dict) -> dict:
         """Return loaded settings with any missing top-level keys filled from _DEFAULT_SETTINGS."""
-        return {**_DEFAULT_SETTINGS, **loaded}
+        result = {**_DEFAULT_SETTINGS, **loaded}
+        # Deep-merge ae_names and team_names so new default entries flow through even when DB has existing settings.
+        result["ae_names"] = {**_DEFAULT_SETTINGS.get("ae_names", {}), **loaded.get("ae_names", {})}
+        result["team_names"] = {**_DEFAULT_SETTINGS.get("team_names", {}), **loaded.get("team_names", {})}
+        return result
 
     def _patch_direct_columns(cfg: dict) -> dict:
         """Add any direct_sources columns present in settings.json but absent from cfg (e.g. DB has stale copy)."""
@@ -218,6 +226,28 @@ def _load_settings() -> dict:
             patched.append({**src, "columns": merged_cols})
         return {**cfg, "direct_sources": patched}
 
+    def _patch_ssp_defaults(cfg: dict) -> dict:
+        """Backfill per-SSP fields (e.g. deal_source_default) from settings.json onto DB-loaded ssps.
+
+        Without this, adding a new SSP-level field to settings.json (like the GAM=Publisher
+        deal-source rule from PR #10) is silently dropped for any environment whose DB snapshot
+        predates the field — DB values always win in _load_settings, so user-edited fields
+        survive while genuinely-new keys flow through.
+        """
+        file_by_name: dict = {}
+        if _SETTINGS_PATH.exists():
+            try:
+                with open(_SETTINGS_PATH) as _pf:
+                    file_by_name = {s["name"]: s for s in json.load(_pf).get("ssps", [])}
+            except Exception:
+                file_by_name = {}
+        default_by_name = {s["name"]: s for s in _DEFAULT_SETTINGS.get("ssps", [])}
+        patched = []
+        for ssp in cfg.get("ssps", []):
+            base = {**default_by_name.get(ssp["name"], {}), **file_by_name.get(ssp["name"], {})}
+            patched.append({**base, **ssp})
+        return {**cfg, "ssps": patched}
+
     # Primary: database (survives redeployments on Streamlit Cloud)
     try:
         with _engine().connect() as conn:
@@ -225,14 +255,14 @@ def _load_settings() -> dict:
                 sqlalchemy.text("SELECT value FROM dashboard_settings WHERE key = 'main'")
             ).fetchone()
             if row:
-                return _patch_direct_columns(_with_defaults(json.loads(row[0])))
+                return _patch_ssp_defaults(_patch_direct_columns(_with_defaults(json.loads(row[0]))))
     except Exception:
         pass
     # Fallback: local file (useful for first-run and local dev)
     if _SETTINGS_PATH.exists():
         try:
             with open(_SETTINGS_PATH) as f:
-                return _with_defaults(json.load(f))
+                return _patch_ssp_defaults(_with_defaults(json.load(f)))
         except Exception:
             pass
     return _DEFAULT_SETTINGS
@@ -857,15 +887,16 @@ with tab_seller:
         st.caption(f"Last refresh: {_fmt_last_refresh(last_pull)}")
 
         gam_df = gam_df.copy()
-        _direct_src = next((s for s in _cfg.get("direct_sources", []) if s.get("enabled", True)), None)
-        _direct_prefix = _direct_src.get("order_name_prefix", "Newsweek_Direct") if _direct_src else "Newsweek_Direct"
-        # Use order_name when populated; fall back to line_item_name prefix for rows
-        # where order_name hasn't been fetched yet (NULL from older refresh runs).
+        _incl_patterns = _cfg.get("included_order_patterns", ["Newsweek_Direct%"])
+        _prefixes = [p.rstrip("%") for p in _incl_patterns if p]
         _order_populated = gam_df["order_name"].notna() & (gam_df["order_name"] != "")
-        _match_order = _order_populated & gam_df["order_name"].str.startswith(_direct_prefix, na=False)
-        _match_li = (~_order_populated) & gam_df["line_item_name"].str.startswith(_direct_prefix, na=False)
-        gam_df = gam_df[_match_order | _match_li]
-        gam_df = gam_df[~gam_df["order_name"].str.startswith("Newsweek_Test", na=False)]
+        if _prefixes:
+            _match_order = pd.Series(False, index=gam_df.index)
+            _match_li = pd.Series(False, index=gam_df.index)
+            for _pfx in _prefixes:
+                _match_order |= _order_populated & gam_df["order_name"].str.startswith(_pfx, na=False)
+                _match_li |= (~_order_populated) & gam_df["line_item_name"].str.startswith(_pfx, na=False)
+            gam_df = gam_df[_match_order | _match_li]
 
         for datecol in ("start_date", "end_date"):
             if datecol in gam_df.columns:
@@ -918,14 +949,17 @@ with tab_seller:
             return parts[idx].strip() if len(parts) > idx else None
 
         gam_df["advertiser"]    = gam_df["line_item_name"].apply(_li_part, idx=7)
-        gam_df["campaign_name"] = gam_df["line_item_name"].apply(_li_part, idx=8)
+        gam_df["campaign_name"] = gam_df["line_item_name"].apply(_li_part, idx=8).str.replace("-", " ", regex=False)
         gam_df["ad_format"]     = gam_df["line_item_name"].apply(_li_part, idx=10)
-
-        # Exclude test line items based on advertiser patterns from settings
-        _excl_patterns = _cfg.get("excluded_advertiser_patterns", [])
-        if _excl_patterns and "advertiser" in gam_df.columns:
-            _excl_re = "|".join(_excl_patterns)
-            gam_df = gam_df[~gam_df["advertiser"].str.contains(_excl_re, case=False, na=False)]
+        _team_map = _cfg.get("team_names", {"USA": "USA", "INTL": "International"})
+        gam_df["team"] = (
+            gam_df["line_item_name"]
+            .str.extract(r"_Team-(USA|INTL)_", expand=False)
+            .map(_team_map)
+        )
+        for _col in ("advertiser", "campaign_name", "ad_format", "seller_ae", "team"):
+            if _col in gam_df.columns:
+                gam_df[_col] = gam_df[_col].replace({None: pd.NA, "None": pd.NA, "": pd.NA})
 
         # Load Pubmatic sellers so they appear in the shared filter
         try:
@@ -942,7 +976,7 @@ with tab_seller:
 
         all_sellers = sorted(set(gam_df["seller_ae"].dropna().unique()) | set(_pmp_sellers))
 
-        f1, f2, f3, f4 = st.columns(4)
+        f1, f2, f3, f4, f5 = st.columns(5)
         with f1:
             selected_seller = st.selectbox(
                 "Seller",
@@ -977,6 +1011,13 @@ with tab_seller:
                 default=_status_defaults,
                 key="gam_status_filter",
             )
+        with f5:
+            team_opts = sorted(gam_df["team"].dropna().unique())
+            selected_teams = st.multiselect(
+                "Team",
+                options=team_opts,
+                key="gam_team_filter",
+            )
 
         view_gam = gam_df if selected_seller == "All" else gam_df[gam_df["seller_ae"] == selected_seller].copy()
         if selected_advertisers:
@@ -985,6 +1026,8 @@ with tab_seller:
             view_gam = view_gam[view_gam["ad_format"].isin(selected_formats)]
         if selected_statuses:
             view_gam = view_gam[view_gam["status"].isin(selected_statuses)]
+        if selected_teams:
+            view_gam = view_gam[view_gam["team"].isin(selected_teams)]
 
         if view_gam.empty:
             st.info("No campaigns found for the selected seller.")
@@ -1030,6 +1073,10 @@ with tab_seller:
                 or ("ad_format" in view_gam.columns and view_gam["ad_format"].str.lower().eq("video").any())
             )
 
+            _direct_src = next(
+                (s for s in _cfg.get("direct_sources", []) if s.get("name") == "GAM Direct"),
+                None,
+            )
             _direct_col_map = _direct_src.get("columns", {}) if _direct_src else {}
             if _direct_col_map:
                 # Build source_col → display_name from settings (preserving order)
@@ -1310,6 +1357,17 @@ with tab_seller:
                         .agg(**_agg_kwargs)
                         .reset_index()
                     )
+                    # Enrich with PA deal metadata (floor price, status) from gam_pa_metadata
+                    try:
+                        _pa_meta = load("gam_pa_metadata")
+                        if not _pa_meta.empty and "deal_name" in _pa_meta.columns:
+                            _pa_lookup = (
+                                _pa_meta[["deal_name", "floor_price_usd", "deal_status"]]
+                                .drop_duplicates("deal_name")
+                            )
+                            _gam_agg = _gam_agg.merge(_pa_lookup, on="deal_name", how="left")
+                    except Exception:
+                        pass
                     _gam_agg["SSP"] = "GAM"
                     _gam_agg["Win Rate %"] = None
                     _gam_agg["Total Requests"] = None
@@ -1318,6 +1376,7 @@ with tab_seller:
                         "seller_ae": "Seller", "deal_name": "Deal",
                         "deal_type_label": "Deal Type", "ad_format": "Format", "dsp": "DSP",
                         "paid_impressions": "Paid Impressions", "revenue": "Revenue", "ecpm": "eCPM",
+                        "floor_price_usd": "Floor CPM", "deal_status": "Deal Status",
                     })
         except Exception:
             pass
@@ -1499,23 +1558,6 @@ with tab_seller:
     st.session_state["_pmp_formats_opts"]      = sorted(combined_pmp["Format"].dropna().unique().tolist())
     st.session_state["_pmp_deal_sources_opts"] = sorted(combined_pmp["Deal Source"].dropna().unique().tolist()) if "Deal Source" in combined_pmp.columns else []
 
-    with st.expander("🔍 Debug: PMP data sources", expanded=False):
-        _dbg = {
-            "Pubmatic rows (pre-filter)": len(pmp_summary),
-            "Magnite rows (pre-filter)": len(_magnite_summary),
-            "GAM rows (pre-filter)": len(_gam_summary),
-            "Magnite deal types": _magnite_summary["Deal Type"].value_counts().to_dict() if not _magnite_summary.empty else "EMPTY",
-            "GAM deal types": _gam_summary["Deal Type"].value_counts().to_dict() if not _gam_summary.empty else "EMPTY",
-            "Active SSP filter": sel_pmp_ssps or "none",
-            "Active Deal Type filter": sel_pmp_deal_types or "none",
-            "Active DSP filter": sel_pmp_dsps or "none",
-            "Active Format filter": sel_pmp_formats or "none",
-            "Active Deal Source filter": sel_pmp_deal_sources or "none",
-        }
-        if _load_errors:
-            _dbg["DB LOAD ERRORS"] = _load_errors
-        st.json(_dbg)
-
     _combined_prefilter = combined_pmp.copy()
 
     if sel_pmp_ssps:
@@ -1553,6 +1595,7 @@ with tab_seller:
         pm3.metric("Avg eCPM", f"${combined_pmp['eCPM'].mean():,.2f}" if len(combined_pmp) else "—")
 
         _pmp_col_order = ["Seller", "SSP", "Deal", "Deal Type", "Format", "DSP", "Deal Source",
+                          "Deal Status", "Floor CPM",
                           "Paid Impressions", "Revenue", "eCPM",
                           "Win Rate %", "Total Requests", "Bid Responses"]
         combined_pmp = combined_pmp[[c for c in _pmp_col_order if c in combined_pmp.columns]]
@@ -1562,6 +1605,8 @@ with tab_seller:
             use_container_width=True,
             hide_index=True,
             column_config={
+                "Deal Status": st.column_config.TextColumn("Deal Status"),
+                "Floor CPM": st.column_config.NumberColumn("Floor CPM", format="dollar"),
                 "Paid Impressions": st.column_config.NumberColumn(format="localized"),
                 "Revenue": st.column_config.NumberColumn(format="dollar"),
                 "eCPM": st.column_config.NumberColumn(format="dollar"),
@@ -1822,52 +1867,44 @@ with tab_settings:
     with _settings_direct_tab:
         # ── Section 7: Direct Campaign Sources ──────────────────────────────
         st.markdown("#### Direct Campaign Sources")
-        st.caption(
-            "Each row is a direct-sold data source. **Order Name Prefix** filters the table to only direct campaigns. "
-            "Disabling a source hides it from the Direct Campaigns table."
-        )
+        st.caption("Each row is a direct-sold data source. Disabling a source hides it from the Direct Campaigns table.")
 
         _direct_rows = [
             {
-                "Source Name":       s["name"],
-                "Enabled":           s.get("enabled", True),
-                "Database Table":    s["table"],
-                "Order Name Prefix": s.get("order_name_prefix", ""),
+                "Source Name":    s["name"],
+                "Enabled":        s.get("enabled", True),
+                "Database Table": s["table"],
             }
             for s in _s.get("direct_sources", [])
         ]
         _direct_edit = st.data_editor(
             pd.DataFrame(_direct_rows) if _direct_rows else pd.DataFrame(
-                columns=["Source Name", "Enabled", "Database Table", "Order Name Prefix"]
+                columns=["Source Name", "Enabled", "Database Table"]
             ),
             use_container_width=True,
             hide_index=True,
             num_rows="dynamic",
             key="settings_direct_sources_v2",
             column_config={
-                "Source Name":       st.column_config.TextColumn("Source Name", required=True),
-                "Enabled":           st.column_config.CheckboxColumn("Enabled"),
-                "Database Table":    st.column_config.TextColumn(
+                "Source Name":    st.column_config.TextColumn("Source Name", required=True),
+                "Enabled":        st.column_config.CheckboxColumn("Enabled"),
+                "Database Table": st.column_config.TextColumn(
                     "Database Table",
                     help="Table populated by refresh_cache.py (e.g. gam_campaigns)",
-                ),
-                "Order Name Prefix": st.column_config.TextColumn(
-                    "Order Name Prefix",
-                    help="Filter to orders whose name starts with this value (e.g. Newsweek_Direct)",
                 ),
             },
         )
 
-        st.markdown("##### Excluded Advertiser Patterns")
-        st.caption("Line items whose advertiser name matches any of these patterns are hidden from the Direct Campaigns table. Supports regex (e.g. `\\[nw\\]`).")
-        _excl_rows = [{"Pattern": p} for p in _s.get("excluded_advertiser_patterns", [])]
-        _excl_edit = st.data_editor(
-            pd.DataFrame(_excl_rows) if _excl_rows else pd.DataFrame(columns=["Pattern"]),
+        st.markdown("##### Included Order Patterns")
+        st.caption("Only orders whose name matches one of these patterns are shown. Use `%` as a wildcard (e.g. `Newsweek_Direct%`).")
+        _incl_rows = [{"Pattern": p} for p in _s.get("included_order_patterns", ["Newsweek_Direct%"])]
+        _incl_edit = st.data_editor(
+            pd.DataFrame(_incl_rows) if _incl_rows else pd.DataFrame(columns=["Pattern"]),
             use_container_width=True,
             hide_index=True,
             num_rows="dynamic",
-            key="settings_excluded_advertiser_patterns",
-            column_config={"Pattern": st.column_config.TextColumn("Pattern", help="Regex or plain string matched against the advertiser name")},
+            key="settings_included_order_patterns",
+            column_config={"Pattern": st.column_config.TextColumn("Pattern", help="Order name prefix, use % as wildcard (e.g. Newsweek_Direct%)")},
         )
 
         st.markdown("##### Default Status Filter")
@@ -1962,6 +1999,23 @@ with tab_settings:
             column_config={
                 "Code":      st.column_config.TextColumn("Code", required=True, help="e.g. JAmalfi"),
                 "Full Name": st.column_config.TextColumn("Full Name", required=True, help="e.g. Julie Amalfi"),
+            },
+        )
+
+        # ── Section 4b: Team Mapping ─────────────────────────────────────────
+        st.markdown("#### Team Mapping")
+        st.caption("Maps team codes in line item names (USA, INTL) to display labels.")
+
+        _team_rows = [{"Code": k, "Label": v} for k, v in sorted(_s.get("team_names", {}).items())]
+        _team_edit = st.data_editor(
+            pd.DataFrame(_team_rows) if _team_rows else pd.DataFrame(columns=["Code", "Label"]),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="settings_team",
+            column_config={
+                "Code":  st.column_config.TextColumn("Code", required=True, help="e.g. USA, INTL"),
+                "Label": st.column_config.TextColumn("Label", required=True, help="e.g. USA, International"),
             },
         )
 
@@ -2097,6 +2151,11 @@ with tab_settings:
                 for _, r in _ae_edit.iterrows()
                 if pd.notna(r.get("Code")) and str(r["Code"]).strip()
             }
+            _new_team = {
+                str(r["Code"]).strip(): str(r["Label"]).strip()
+                for _, r in _team_edit.iterrows()
+                if pd.notna(r.get("Code")) and str(r["Code"]).strip()
+            }
             _new_dt = {
                 str(r["Code"]).strip(): str(r["Label"]).strip()
                 for _, r in _dt_edit.iterrows()
@@ -2119,7 +2178,7 @@ with tab_settings:
                     "name":             _dsrc_name,
                     "enabled":          bool(_row.get("Enabled", True)),
                     "table":            str(_row.get("Database Table", "")).strip(),
-                    "order_name_prefix": str(_row.get("Order Name Prefix", "")).strip(),
+
                     "columns":          _dcol_map,
                 })
 
@@ -2148,17 +2207,17 @@ with tab_settings:
                 and pd.notna(r.get("Canonical Deal Source Name")) and str(r["Canonical Deal Source Name"]).strip()
             }
 
-            _new_excl_patterns = [
+            _new_incl_patterns = [
                 str(r["Pattern"]).strip()
-                for _, r in _excl_edit.iterrows()
+                for _, r in _incl_edit.iterrows()
                 if pd.notna(r.get("Pattern")) and str(r["Pattern"]).strip()
             ]
             _save_settings({
-                "ssps": _new_ssps, "ae_names": _new_ae,
+                "ssps": _new_ssps, "ae_names": _new_ae, "team_names": _new_team,
                 "deal_type_codes": _new_dt, "deal_type_aliases": _new_aliases,
                 "dsp_aliases": _new_dsp_aliases, "format_aliases": _new_format_aliases,
                 "deal_source_aliases": _new_deal_source_aliases,
-                "excluded_advertiser_patterns": _new_excl_patterns,
+                "included_order_patterns": _new_incl_patterns,
                 "default_statuses": list(_default_statuses_edit),
                 "direct_sources": _new_direct,
             })
