@@ -34,7 +34,7 @@ jobs:
           client = ad_manager.AdManagerClient(
               oauth2_client, "NWRenamer/1.0", network_code=network_code
           )
-          li_service = client.GetService("LineItemService", version="v202502")
+          li_service = client.GetService("LineItemService", version="v202605")
 
           sb = ad_manager.StatementBuilder()
           sb.Where("orderId = :orderId")
