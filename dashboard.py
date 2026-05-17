@@ -912,6 +912,10 @@ with tab_seller:
         gam_df["campaign_name"] = gam_df["line_item_name"].apply(_li_part, idx=8)
         gam_df["ad_format"]     = gam_df["line_item_name"].apply(_li_part, idx=10)
 
+        # Exclude internal test line items (advertiser name contains "[nw]")
+        if "advertiser" in gam_df.columns:
+            gam_df = gam_df[~gam_df["advertiser"].str.contains(r"\[nw\]", case=False, na=False)]
+
         # Load Pubmatic sellers so they appear in the shared filter
         try:
             _pmp_sellers_df = load("pubmatic_deals")
