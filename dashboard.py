@@ -79,7 +79,7 @@ _DEFAULT_SETTINGS: dict = {
         },
         {
             "name": "Magnite", "enabled": True, "table": "magnite_deal_daily",
-            "deal_types": ["Private Auction", "Preferred Deal", "Private Marketplace"],
+            "deal_types": ["Private Auction", "Preferred Deal", "Private Marketplace", "Auction Package"],
             "columns": {
                 "Deal": "deal", "Deal Type": "[auto]", "DSP": "partner",
                 "Format": "ad_format", "Seller": "[auto]",
@@ -155,7 +155,6 @@ _DEFAULT_SETTINGS: dict = {
         "PMP": "Private Auction",
         "PMP Preferred": "Preferred Deal",
         "Marketplace Deal": "Private Marketplace",
-        "Auction Package": "Private Marketplace",
         "Preferred Deals": "Preferred Deal",
         "Programmatic Guaranteed Deal": "Programmatic Guaranteed",
         "Private Marketplace Deal": "Private Marketplace",

@@ -23,7 +23,7 @@
       "name": "Magnite",
       "enabled": true,
       "table": "magnite_deal_daily",
-      "deal_types": ["Private Auction", "Preferred Deal", "Private Marketplace"],
+      "deal_types": ["Private Auction", "Preferred Deal", "Private Marketplace", "Auction Package"],
       "columns": {
         "Deal":             "deal",
         "Deal Type":        "[auto]",
@@ -122,7 +122,6 @@
     "PMP": "Private Auction",
     "PMP Preferred": "Preferred Deal",
     "Marketplace Deal": "Private Marketplace",
-    "Auction Package": "Private Marketplace",
     "Preferred Deals": "Preferred Deal",
     "Programmatic Guaranteed Deal": "Programmatic Guaranteed",
     "Private Marketplace Deal": "Private Marketplace"
