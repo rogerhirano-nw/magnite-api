@@ -877,9 +877,8 @@ with tab_seller:
         # Extract seller — prefer GAM salesperson field, fall back to name regex
         # GAM returns "Newsweek - Sales - Full Name (email)" — normalize to just the name.
         def _parse_gam_salesperson(val):
-            if not isinstance(val, str):
+            if not isinstance(val, str) or not val.strip():
                 return None
-            # Extract name between last " - " and " ("
             m = re.search(r"-\s*([^-(]+?)\s*(?:\(|$)", val)
             return m.group(1).strip() if m else val.strip()
 
