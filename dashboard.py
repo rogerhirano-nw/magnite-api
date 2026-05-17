@@ -924,7 +924,7 @@ with tab_seller:
         gam_df["advertiser"]    = gam_df["line_item_name"].apply(_li_part, idx=7)
         gam_df["campaign_name"] = gam_df["line_item_name"].apply(_li_part, idx=8).str.replace("-", " ", regex=False)
         gam_df["ad_format"]     = gam_df["line_item_name"].apply(_li_part, idx=10)
-        _team_map = {"USA": "Team USA", "INTL": "International"}
+        _team_map = {"USA": "USA", "INTL": "International"}
         gam_df["team"] = (
             gam_df["line_item_name"]
             .str.extract(r"_Team-(USA|INTL)_", expand=False)
