@@ -98,7 +98,39 @@ jobs:
                       print(f"  OK — {len(auctions)} auctions returned")
                       for a in auctions[:5]:
                           print(f"    name={getattr(a, 'name', None)} display={getattr(a, 'display_name', None)} archived={getattr(a, 'archived', None)}")
-                      break  # stop on first success
+                      # Now probe list_private_auction_deals on the first few non-archived auctions
+                      # — this is the actual call that crashes refresh_gam_private_auctions.
+                      print()
+                      print("--- probing list_private_auction_deals (inner call) ---")
+                      non_archived = [a for a in auctions if not getattr(a, "archived", False)]
+                      print(f"  non-archived auctions: {len(non_archived)} / {len(auctions)}")
+                      for a in non_archived[:5]:
+                          print(f"\n  auction: {a.name}  ({(a.display_name or '')[:60]})")
+                          for dl_label, dl_kwargs in [
+                              ("parent only",            dict(parent=a.name)),
+                              ("parent + page_size=200", dict(parent=a.name, page_size=200)),
+                          ]:
+                              try:
+                                  dreq = admanager_v1.ListPrivateAuctionDealsRequest(**dl_kwargs)
+                                  deals = list(gam._pad_client.list_private_auction_deals(dreq))
+                                  print(f"    [{dl_label}] OK — {len(deals)} deals")
+                                  for d in deals[:2]:
+                                      print(f"      deal: name={getattr(d, 'name', None)} display={getattr(d, 'display_name', None)} status={getattr(d, 'status', None)}")
+                                  break
+                              except Exception as de:
+                                  print(f"    [{dl_label}] FAILED: {type(de).__name__}: {de}")
+                                  dd = getattr(de, "details", None)
+                                  if callable(dd):
+                                      try: print(f"      details(): {dd()}")
+                                      except Exception: pass
+                                  for attr in ("code", "debug_error_string"):
+                                      v = getattr(de, attr, None)
+                                      if callable(v):
+                                          try: v = v()
+                                          except Exception: pass
+                                      if v is not None:
+                                          print(f"      {attr}: {v}")
+                      break  # stop on first success of list_private_auctions
                   except Exception as e:
                       print(f"  FAILED: {type(e).__name__}: {e}")
                       details = getattr(e, "details", None)
