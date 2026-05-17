@@ -745,7 +745,12 @@ with tab_pubmatic:
             dsp_opts = sorted(pm_df["dsp"].dropna().unique()) if "dsp" in pm_df.columns else []
             sel_dsps = st.multiselect("DSP", dsp_opts, key="pm_dsp_filter")
         with f2:
-            deal_type_opts = sorted(pm_df["deal"].dropna().str.extract(r"Newsweek_([^_]+)", expand=False).dropna().unique()) if "deal" in pm_df.columns else []
+            _pm_dt_aliases = _cfg.get("deal_type_aliases", {})
+            if "deal_type" in pm_df.columns:
+                _pm_dt_labels = pm_df["deal_type"].dropna().replace(_pm_dt_aliases)
+                deal_type_opts = sorted(_pm_dt_labels.unique().tolist())
+            else:
+                deal_type_opts = []
             sel_deal_types = st.multiselect("Deal type", deal_type_opts, key="pm_deal_type_filter")
         with f3:
             format_opts = sorted(pm_df["ad_format"].dropna().unique()) if "ad_format" in pm_df.columns else []
@@ -756,8 +761,8 @@ with tab_pubmatic:
         view = pm_df[(pm_df["date"] >= start) & (pm_df["date"] <= end)]
         if sel_dsps:
             view = view[view["dsp"].isin(sel_dsps)]
-        if sel_deal_types:
-            view = view[view["deal"].str.extract(r"Newsweek_([^_]+)", expand=False).isin(sel_deal_types)]
+        if sel_deal_types and "deal_type" in view.columns:
+            view = view[view["deal_type"].replace(_pm_dt_aliases).isin(sel_deal_types)]
         if sel_formats and "ad_format" in view.columns:
             view = view[view["ad_format"].isin(sel_formats)]
         if pm_search:
