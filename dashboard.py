@@ -1805,7 +1805,7 @@ with tab_settings:
         use_container_width=True,
         hide_index=True,
         num_rows="dynamic",
-        key="settings_direct_sources",
+        key="settings_direct_sources_v2",
         column_config={
             "Source Name":       st.column_config.TextColumn("Source Name", required=True),
             "Enabled":           st.column_config.CheckboxColumn("Enabled"),
