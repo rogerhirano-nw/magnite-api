@@ -311,8 +311,21 @@ class GAMClient:
 
             # CPM rate
             rate = getattr(li, "rate", None)
-            cost_type = _enum_name(getattr(li, "cost_type", "") or "").upper()
-            cpm_rate = _money(rate) if rate and cost_type == "CPM" else None
+            cpm_rate = _money(rate) if rate else None
+
+            # Status — REST API v1 LineItem has no status field; derive from dates.
+            start_str = _ts_to_date(getattr(li, "start_time", None))
+            end_str   = _ts_to_date(getattr(li, "end_time", None))
+            if start_str and end_str:
+                start_d, end_d = date.fromisoformat(start_str), date.fromisoformat(end_str)
+                if end_d < today:
+                    li_status = "Completed"
+                elif start_d > today:
+                    li_status = "Upcoming"
+                else:
+                    li_status = "Delivering"
+            else:
+                li_status = ""
 
             rows.append({
                 "line_item_id": li_id,
@@ -322,9 +335,9 @@ class GAMClient:
                 "line_item_type": _enum_name(getattr(li, "line_item_type", "") or ""),
                 "impressions_goal": impressions_goal,
                 "cpm_rate": cpm_rate,
-                "start_date": _ts_to_date(getattr(li, "start_time", None)),
-                "end_date": _ts_to_date(getattr(li, "end_time", None)),
-                "status": _enum_name(getattr(li, "status", "") or ""),
+                "start_date": start_str,
+                "end_date": end_str,
+                "status": li_status,
                 "salesperson": None,
             })
 
