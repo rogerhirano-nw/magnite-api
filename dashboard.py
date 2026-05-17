@@ -1031,6 +1031,10 @@ with tab_seller:
                 or ("ad_format" in view_gam.columns and view_gam["ad_format"].str.lower().eq("video").any())
             )
 
+            _direct_src = next(
+                (s for s in _cfg.get("direct_sources", []) if s.get("name") == "GAM Direct"),
+                None,
+            )
             _direct_col_map = _direct_src.get("columns", {}) if _direct_src else {}
             if _direct_col_map:
                 # Build source_col → display_name from settings (preserving order)
