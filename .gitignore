@@ -3,3 +3,8 @@
 *.csv
 __pycache__/
 .streamlit/secrets.toml
+.DS_Store
+
+# Claude Code: track shared settings, ignore local/session state
+.claude/*
+!.claude/settings.json
