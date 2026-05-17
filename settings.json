@@ -61,6 +61,7 @@
   "ae_names": {
     "AShah":     "Amit Shah",
     "BKaretny":  "Ben Karetny",
+    "Bkaretny":  "Ben Karetny",
     "BRobinson": "Brian Robinson",
     "DDivack":   "Dana Divack",
     "DVarvaro":  "Danielle Varvaro",
@@ -71,6 +72,7 @@
     "KWebb":     "House",
     "RShore":    "Rob Shore",
     "SCarroll":  "Summer Carroll",
+    "SCaroll":   "Summer Carroll",
     "THern":     "Theresa Hern",
     "House":     "House"
   },
