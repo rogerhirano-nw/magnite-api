@@ -152,6 +152,8 @@ _DEFAULT_SETTINGS: dict = {
         "In-stream video": "Video",
     },
     "deal_type_aliases": {
+        "PMP": "Private Auction",
+        "PMP Preferred": "Preferred Deal",
         "Preferred Deals": "Preferred Deal",
         "Programmatic Guaranteed Deal": "Programmatic Guaranteed",
         "Private Marketplace Deal": "Private Marketplace",
@@ -1128,7 +1130,17 @@ with tab_seller:
         )
         if selected_seller != "All":
             pmp_df = pmp_df[pmp_df["seller_ae"] == selected_seller]
-        pmp_df["deal_type_label"] = pmp_df["deal"].apply(lambda d: _parse_deal(d)["deal_type_label"])
+        _dt_aliases = _cfg.get("deal_type_aliases", {})
+        if "deal_type" in pmp_df.columns:
+            pmp_df["deal_type_label"] = pmp_df["deal_type"].map(
+                lambda v: _dt_aliases.get(v, v) if pd.notna(v) and str(v).strip() else None
+            )
+            _fb = pmp_df["deal_type_label"].isna()
+            pmp_df.loc[_fb, "deal_type_label"] = pmp_df.loc[_fb, "deal"].apply(
+                lambda d: _parse_deal(d)["deal_type_label"]
+            )
+        else:
+            pmp_df["deal_type_label"] = pmp_df["deal"].apply(lambda d: _parse_deal(d)["deal_type_label"])
         if sel_pmp_deal_types:
             pmp_df = pmp_df[pmp_df["deal_type_label"].isin(sel_pmp_deal_types)]
         pmp_df["ssp"] = "Pubmatic"

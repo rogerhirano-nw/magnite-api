@@ -119,6 +119,8 @@
     "In-stream video": "Video"
   },
   "deal_type_aliases": {
+    "PMP": "Private Auction",
+    "PMP Preferred": "Preferred Deal",
     "Preferred Deals": "Preferred Deal",
     "Programmatic Guaranteed Deal": "Programmatic Guaranteed",
     "Private Marketplace Deal": "Private Marketplace"
