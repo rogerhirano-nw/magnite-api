@@ -1131,17 +1131,15 @@ with tab_seller:
         )
         if selected_seller != "All":
             pmp_df = pmp_df[pmp_df["seller_ae"] == selected_seller]
+        # _parse_deal() is primary — it reads the type code from the deal name (PD_, PA_, PG_).
+        # channelTypeId is fallback only for deals whose names have no recognizable type code.
         _dt_aliases = _cfg.get("deal_type_aliases", {})
+        pmp_df["deal_type_label"] = pmp_df["deal"].apply(lambda d: _parse_deal(d)["deal_type_label"])
         if "deal_type" in pmp_df.columns:
-            pmp_df["deal_type_label"] = pmp_df["deal_type"].map(
+            _fb = pmp_df["deal_type_label"].isna()
+            pmp_df.loc[_fb, "deal_type_label"] = pmp_df.loc[_fb, "deal_type"].map(
                 lambda v: _dt_aliases.get(v, v) if pd.notna(v) and str(v).strip() else None
             )
-            _fb = pmp_df["deal_type_label"].isna()
-            pmp_df.loc[_fb, "deal_type_label"] = pmp_df.loc[_fb, "deal"].apply(
-                lambda d: _parse_deal(d)["deal_type_label"]
-            )
-        else:
-            pmp_df["deal_type_label"] = pmp_df["deal"].apply(lambda d: _parse_deal(d)["deal_type_label"])
         if sel_pmp_deal_types:
             pmp_df = pmp_df[pmp_df["deal_type_label"].isin(sel_pmp_deal_types)]
         pmp_df["ssp"] = "Pubmatic"
@@ -1260,16 +1258,13 @@ with tab_seller:
             _mag_df = load("magnite_deal_daily").copy()
             if not _mag_df.empty and "deal" in _mag_df.columns:
                 _dt_aliases = _cfg.get("deal_type_aliases", {})
+                # _parse_deal() is primary; demand_type_ad_resp is fallback for unrecognized deal names.
+                _mag_df["deal_type_label"] = _mag_df["deal"].apply(lambda d: _parse_deal(d)["deal_type_label"])
                 if "demand_type_ad_resp" in _mag_df.columns:
-                    _mag_df["deal_type_label"] = _mag_df["demand_type_ad_resp"].map(
+                    _fb = _mag_df["deal_type_label"].isna()
+                    _mag_df.loc[_fb, "deal_type_label"] = _mag_df.loc[_fb, "demand_type_ad_resp"].map(
                         lambda v: _dt_aliases.get(v, v) if pd.notna(v) and str(v).strip() not in ("", "-N/A-") else None
                     )
-                    _fb = _mag_df["deal_type_label"].isna()
-                    _mag_df.loc[_fb, "deal_type_label"] = _mag_df.loc[_fb, "deal"].apply(
-                        lambda d: _parse_deal(d)["deal_type_label"]
-                    )
-                else:
-                    _mag_df["deal_type_label"] = _mag_df["deal"].apply(lambda d: _parse_deal(d)["deal_type_label"])
                 _mag_df = _mag_df[_mag_df["deal_type_label"].isin(_mag_types)]
                 _mag_df["ssp"] = "Magnite"
                 _mag_df["seller_ae"] = (
