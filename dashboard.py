@@ -162,6 +162,7 @@ _DEFAULT_SETTINGS: dict = {
         "Programmatic Guaranteed Deal": "Programmatic Guaranteed",
         "Private Marketplace Deal": "Private Marketplace",
     },
+    "excluded_advertiser_patterns": [r"\[nw\]"],
     "direct_sources": [
         {
             "name": "GAM Direct",
@@ -912,9 +913,11 @@ with tab_seller:
         gam_df["campaign_name"] = gam_df["line_item_name"].apply(_li_part, idx=8)
         gam_df["ad_format"]     = gam_df["line_item_name"].apply(_li_part, idx=10)
 
-        # Exclude internal test line items (advertiser name contains "[nw]")
-        if "advertiser" in gam_df.columns:
-            gam_df = gam_df[~gam_df["advertiser"].str.contains(r"\[nw\]", case=False, na=False)]
+        # Exclude test line items based on advertiser patterns from settings
+        _excl_patterns = _cfg.get("excluded_advertiser_patterns", [])
+        if _excl_patterns and "advertiser" in gam_df.columns:
+            _excl_re = "|".join(_excl_patterns)
+            gam_df = gam_df[~gam_df["advertiser"].str.contains(_excl_re, case=False, na=False)]
 
         # Load Pubmatic sellers so they appear in the shared filter
         try:
@@ -1817,6 +1820,18 @@ with tab_settings:
         },
     )
 
+    st.markdown("##### Excluded Advertiser Patterns")
+    st.caption("Line items whose advertiser name matches any of these patterns are hidden from the Direct Campaigns table. Supports regex (e.g. `\\[nw\\]`).")
+    _excl_rows = [{"Pattern": p} for p in _s.get("excluded_advertiser_patterns", [])]
+    _excl_edit = st.data_editor(
+        pd.DataFrame(_excl_rows) if _excl_rows else pd.DataFrame(columns=["Pattern"]),
+        use_container_width=True,
+        hide_index=True,
+        num_rows="dynamic",
+        key="settings_excluded_advertiser_patterns",
+        column_config={"Pattern": st.column_config.TextColumn("Pattern", help="Regex or plain string matched against the advertiser name")},
+    )
+
     st.markdown("##### Direct Campaign Metrics and Dimensions Mapping")
     st.caption(
         "Map each display field to its source column in the database table. "
@@ -2081,11 +2096,17 @@ with tab_settings:
                 and pd.notna(r.get("Canonical Deal Source Name")) and str(r["Canonical Deal Source Name"]).strip()
             }
 
+            _new_excl_patterns = [
+                str(r["Pattern"]).strip()
+                for _, r in _excl_edit.iterrows()
+                if pd.notna(r.get("Pattern")) and str(r["Pattern"]).strip()
+            ]
             _save_settings({
                 "ssps": _new_ssps, "ae_names": _new_ae,
                 "deal_type_codes": _new_dt, "deal_type_aliases": _new_aliases,
                 "dsp_aliases": _new_dsp_aliases, "format_aliases": _new_format_aliases,
                 "deal_source_aliases": _new_deal_source_aliases,
+                "excluded_advertiser_patterns": _new_excl_patterns,
                 "direct_sources": _new_direct,
             })
             st.cache_data.clear()
