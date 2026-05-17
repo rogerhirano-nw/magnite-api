@@ -966,7 +966,7 @@ with tab_seller:
                 "Status",
                 options=status_opts,
                 default=_status_defaults,
-                key="gam_status_filter_v3",
+                key="gam_status_filter_v4",
             )
 
         view_gam = gam_df if selected_seller == "All" else gam_df[gam_df["seller_ae"] == selected_seller].copy()
