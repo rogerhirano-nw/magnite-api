@@ -1,0 +1,118 @@
+name: Temp diagnose GAM Private Auctions
+on:
+  workflow_dispatch:
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - env:
+          GAM_NETWORK_ID:           ${{ secrets.GAM_NETWORK_ID }}
+          GAM_SERVICE_ACCOUNT_JSON: ${{ secrets.GAM_SERVICE_ACCOUNT_JSON }}
+        run: |
+          python - <<'PYEOF'
+          # Diagnostic: figure out why Private Auction GAM deals never show up.
+          #   (1) Run the deals report with NO deal_name filter and inspect what
+          #       comes back for PA channel — confirms whether GAM returns PA
+          #       rows with empty deal_name (which the current filter drops).
+          #   (2) Try the PA REST list call and print the full exception so we
+          #       know what "Invalid request" actually means.
+          from datetime import date, timedelta
+          import traceback
+          from gam_client import GAMClient, admanager_v1
+
+          gam = GAMClient()
+          yesterday = date.today() - timedelta(days=1)
+          start = yesterday - timedelta(days=6)
+
+          print("=" * 70)
+          print("PART 1: Deals report — raw output (no deal_name filter)")
+          print("=" * 70)
+          try:
+              df = gam._run_report(
+                  dimensions=["DATE", "ORDER_NAME", "DEAL_NAME", "DEAL_BUYER_NAME",
+                              "INVENTORY_FORMAT_NAME", "PROGRAMMATIC_CHANNEL_NAME"],
+                  metrics=["AD_SERVER_IMPRESSIONS", "AD_SERVER_REVENUE", "AD_SERVER_AVERAGE_ECPM"],
+                  start_date=start,
+                  end_date=yesterday,
+              )
+              df = df.rename(columns={
+                  "deal_name": "programmatic_deal_name",
+                  "deal_buyer_name": "dsp",
+                  "inventory_format_name": "ad_format",
+                  "ad_server_revenue": "ad_server_cpm_and_cpc_revenue",
+              })
+              print(f"Total raw rows: {len(df)}")
+              print()
+              print("--- Channel distribution (raw, before filter) ---")
+              print(df["programmatic_channel_name"].fillna("(NULL)").value_counts().to_string())
+              print()
+              print("--- Per channel: deal_name nullness ---")
+              for ch, sub in df.groupby(df["programmatic_channel_name"].fillna("(NULL channel)")):
+                  total = len(sub)
+                  is_null = sub["programmatic_deal_name"].isna().sum()
+                  is_empty = (sub["programmatic_deal_name"] == "").sum()
+                  is_na_str = (sub["programmatic_deal_name"] == "(Not applicable)").sum()
+                  has_name = total - is_null - is_empty - is_na_str
+                  print(f"  {ch}: total={total} null={is_null} empty={is_empty} '(Not applicable)'={is_na_str} named={has_name}")
+              print()
+              print("--- Sample 'Private Auction' rows (up to 10) ---")
+              pa = df[df["programmatic_channel_name"].fillna("").str.contains("Private Auction", case=False, na=False)]
+              if pa.empty:
+                  print("  (no rows with channel containing 'Private Auction')")
+                  print()
+                  print("--- All distinct channel values seen ---")
+                  print(sorted(df["programmatic_channel_name"].dropna().unique().tolist()))
+              else:
+                  cols = ["date", "programmatic_channel_name", "programmatic_deal_name",
+                          "order_name", "dsp", "ad_format",
+                          "ad_server_impressions", "ad_server_cpm_and_cpc_revenue"]
+                  print(pa[cols].head(10).to_string())
+          except Exception:
+              traceback.print_exc()
+
+          print()
+          print("=" * 70)
+          print("PART 2: list_private_auctions — what does the API actually say?")
+          print("=" * 70)
+          if gam._pa_client is None:
+              print("PrivateAuctionServiceClient not available in this admanager_v1 build.")
+          else:
+              # Try the current request shape, capture full exception detail.
+              variants = [
+                  ("parent only",                  dict(parent=gam._parent)),
+                  ("parent + page_size=200",       dict(parent=gam._parent, page_size=200)),
+                  ("parent + filter='archived=false'", dict(parent=gam._parent, filter="archived=false")),
+              ]
+              for label, kwargs in variants:
+                  print(f"\n--- attempt: {label} ({kwargs}) ---")
+                  try:
+                      req = admanager_v1.ListPrivateAuctionsRequest(**kwargs)
+                      pager = gam._pa_client.list_private_auctions(req)
+                      auctions = list(pager)
+                      print(f"  OK — {len(auctions)} auctions returned")
+                      for a in auctions[:5]:
+                          print(f"    name={getattr(a, 'name', None)} display={getattr(a, 'display_name', None)} archived={getattr(a, 'archived', None)}")
+                      break  # stop on first success
+                  except Exception as e:
+                      print(f"  FAILED: {type(e).__name__}: {e}")
+                      details = getattr(e, "details", None)
+                      if callable(details):
+                          try:
+                              print(f"  details(): {details()}")
+                          except Exception:
+                              pass
+                      # Print the underlying grpc status if present.
+                      for attr in ("code", "trailing_metadata", "debug_error_string"):
+                          val = getattr(e, attr, None)
+                          if callable(val):
+                              try: val = val()
+                              except Exception: pass
+                          if val is not None:
+                              print(f"  {attr}: {val}")
+          PYEOF
