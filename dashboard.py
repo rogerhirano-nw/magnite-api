@@ -1566,454 +1566,459 @@ with tab_settings:
         "Programmatic Guaranteed", "Private Marketplace",
     ]
 
-    # ── Section 1: PMP Data Sources ─────────────────────────────────────
-    st.markdown("#### PMP Data Sources")
-    st.caption(
-        "Each row is one SSP. **Deal Types** controls which deal types that SSP contributes to the PMP table. "
-        "Disabling an SSP hides it from all filters and tables."
-    )
+    _settings_pmp_tab, _settings_direct_tab = st.tabs(["PMP Deals", "Direct Campaigns"])
 
-    _ssp_rows = [
-        {
-            "SSP Name":       s["name"],
-            "Enabled":        s.get("enabled", True),
-            "Database Table": s["table"],
-            "Deal Types":     ", ".join(s.get("deal_types", [])),
+    with _settings_pmp_tab:
+        # ── Section 1: PMP Data Sources ─────────────────────────────────────
+        st.markdown("#### PMP Data Sources")
+        st.caption(
+            "Each row is one SSP. **Deal Types** controls which deal types that SSP contributes to the PMP table. "
+            "Disabling an SSP hides it from all filters and tables."
+        )
+
+        _ssp_rows = [
+            {
+                "SSP Name":       s["name"],
+                "Enabled":        s.get("enabled", True),
+                "Database Table": s["table"],
+                "Deal Types":     ", ".join(s.get("deal_types", [])),
+            }
+            for s in _s["ssps"]
+        ]
+        _ssp_edit = st.data_editor(
+            pd.DataFrame(_ssp_rows),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="settings_ssps",
+            column_config={
+                "SSP Name":       st.column_config.TextColumn("SSP Name", required=True),
+                "Enabled":        st.column_config.CheckboxColumn("Enabled"),
+                "Database Table": st.column_config.TextColumn(
+                    "Database Table",
+                    help="SQLite/Postgres table populated by refresh_cache.py",
+                ),
+                "Deal Types": st.column_config.TextColumn(
+                    "Deal Types",
+                    help="Comma-separated list — e.g. Private Auction, Preferred Deal",
+                ),
+            },
+        )
+
+        # ── Section 2: Metrics and Dimensions Mapping ───────────────────────
+        st.markdown("#### Metrics and Dimensions Mapping")
+        st.caption(
+            "Each row is a canonical display field; each column is an SSP. "
+            "Use the dropdown in each cell to pick the matching source column from that SSP's table. "
+            "**N/A** = not available. **[auto]** = computed from the deal name (type, format, seller)."
+        )
+
+        _edited_ssp_names = [
+            str(row["SSP Name"]).strip()
+            for _, row in _ssp_edit.iterrows()
+            if pd.notna(row["SSP Name"]) and str(row["SSP Name"]).strip()
+        ]
+        _existing_col_maps = {s["name"]: s.get("columns", {}) for s in _s["ssps"]}
+        _ssp_table_map = {
+            str(row["SSP Name"]).strip(): str(row.get("Database Table", "")).strip()
+            for _, row in _ssp_edit.iterrows()
+            if pd.notna(row["SSP Name"]) and str(row["SSP Name"]).strip()
         }
-        for s in _s["ssps"]
-    ]
-    _ssp_edit = st.data_editor(
-        pd.DataFrame(_ssp_rows),
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        key="settings_ssps",
-        column_config={
-            "SSP Name":       st.column_config.TextColumn("SSP Name", required=True),
-            "Enabled":        st.column_config.CheckboxColumn("Enabled"),
-            "Database Table": st.column_config.TextColumn(
-                "Database Table",
-                help="SQLite/Postgres table populated by refresh_cache.py",
-            ),
-            "Deal Types": st.column_config.TextColumn(
-                "Deal Types",
-                help="Comma-separated list — e.g. Private Auction, Preferred Deal",
-            ),
-        },
-    )
 
-    # ── Section 2: Metrics and Dimensions Mapping ───────────────────────
-    st.markdown("#### Metrics and Dimensions Mapping")
-    st.caption(
-        "Each row is a canonical display field; each column is an SSP. "
-        "Use the dropdown in each cell to pick the matching source column from that SSP's table. "
-        "**N/A** = not available. **[auto]** = computed from the deal name (type, format, seller)."
-    )
+        # Fetch the actual column names from each SSP's table so dropdowns show real options
+        _SPECIAL_OPTS = ["N/A", "[auto]"]
 
-    _edited_ssp_names = [
-        str(row["SSP Name"]).strip()
-        for _, row in _ssp_edit.iterrows()
-        if pd.notna(row["SSP Name"]) and str(row["SSP Name"]).strip()
-    ]
-    _existing_col_maps = {s["name"]: s.get("columns", {}) for s in _s["ssps"]}
-    _ssp_table_map = {
-        str(row["SSP Name"]).strip(): str(row.get("Database Table", "")).strip()
-        for _, row in _ssp_edit.iterrows()
-        if pd.notna(row["SSP Name"]) and str(row["SSP Name"]).strip()
-    }
+        def _table_cols(table: str) -> list:
+            try:
+                with _engine().connect() as _c:
+                    _r = _c.execute(sqlalchemy.text(f'SELECT * FROM "{table}" LIMIT 0'))
+                    return [col for col in _r.keys() if not col.startswith("_")]
+            except Exception:
+                return []
 
-    # Fetch the actual column names from each SSP's table so dropdowns show real options
-    _SPECIAL_OPTS = ["N/A", "[auto]"]
-
-    def _table_cols(table: str) -> list:
-        try:
-            with _engine().connect() as _c:
-                _r = _c.execute(sqlalchemy.text(f'SELECT * FROM "{table}" LIMIT 0'))
-                return [col for col in _r.keys() if not col.startswith("_")]
-        except Exception:
-            return []
-
-    # Build options list per SSP: special values + real columns + any currently-stored custom values
-    _ssp_opts: dict = {}
-    for _sn in _edited_ssp_names:
-        _tbl = _ssp_table_map.get(_sn, "")
-        _real_cols = _table_cols(_tbl)
-        _opts = _SPECIAL_OPTS + [c for c in _real_cols if c not in _SPECIAL_OPTS]
-        # Ensure any currently-stored value is always a valid option
-        for _f in _CANONICAL_FIELDS:
-            _cur = _existing_col_maps.get(_sn, {}).get(_f, "")
-            if _cur and _cur not in _opts:
-                _opts.append(_cur)
-        _ssp_opts[_sn] = _opts
-
-    # Build matrix DataFrame
-    _map_rows = []
-    for _f in _CANONICAL_FIELDS:
-        _row: dict = {"Field": _f}
+        # Build options list per SSP: special values + real columns + any currently-stored custom values
+        _ssp_opts: dict = {}
         for _sn in _edited_ssp_names:
-            _raw = _existing_col_maps.get(_sn, {}).get(_f, "") or ""
-            _row[_sn] = _raw if _raw else "N/A"
-        _map_rows.append(_row)
-    _map_df = pd.DataFrame(_map_rows)
+            _tbl = _ssp_table_map.get(_sn, "")
+            _real_cols = _table_cols(_tbl)
+            _opts = _SPECIAL_OPTS + [c for c in _real_cols if c not in _SPECIAL_OPTS]
+            # Ensure any currently-stored value is always a valid option
+            for _f in _CANONICAL_FIELDS:
+                _cur = _existing_col_maps.get(_sn, {}).get(_f, "")
+                if _cur and _cur not in _opts:
+                    _opts.append(_cur)
+            _ssp_opts[_sn] = _opts
 
-    _map_col_cfg: dict = {
-        "Field": st.column_config.TextColumn("Field", disabled=True, width="small"),
-    }
-    for _sn in _edited_ssp_names:
-        _tbl = _ssp_table_map.get(_sn, "")
-        _map_col_cfg[_sn] = st.column_config.SelectboxColumn(
-            _sn,
-            options=_ssp_opts[_sn],
-            width="medium",
-            help=f"Source column from `{_tbl}`. N/A = not available. [auto] = parsed from deal name.",
-            required=False,
-        )
+        # Build matrix DataFrame
+        _map_rows = []
+        for _f in _CANONICAL_FIELDS:
+            _row: dict = {"Field": _f}
+            for _sn in _edited_ssp_names:
+                _raw = _existing_col_maps.get(_sn, {}).get(_f, "") or ""
+                _row[_sn] = _raw if _raw else "N/A"
+            _map_rows.append(_row)
+        _map_df = pd.DataFrame(_map_rows)
 
-    _map_edit = st.data_editor(
-        _map_df,
-        use_container_width=True,
-        hide_index=True,
-        key="settings_colmap",
-        column_config=_map_col_cfg,
-        disabled=["Field"],
-    )
-
-    # ── Section 3: Deal Type Value Aliases ──────────────────────────────
-    st.markdown("#### Deal Type Value Aliases")
-    st.caption(
-        "Map raw values returned by SSP APIs to canonical deal type labels. "
-        "For example, GAM's REST API returns \"Preferred Deals\" (plural) — alias it to "
-        "\"Preferred Deal\" so it matches the canonical label used across all SSPs."
-    )
-    _alias_rows = [
-        {"Raw Value": k, "Canonical Deal Type": v}
-        for k, v in _s.get("deal_type_aliases", {}).items()
-    ]
-    _alias_edit = st.data_editor(
-        pd.DataFrame(_alias_rows) if _alias_rows else pd.DataFrame(
-            columns=["Raw Value", "Canonical Deal Type"]
-        ),
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        key="settings_deal_type_aliases",
-        column_config={
-            "Raw Value": st.column_config.TextColumn(
-                "Raw Value", help="Exact string returned by the SSP API", required=True
-            ),
-            "Canonical Deal Type": st.column_config.SelectboxColumn(
-                "Canonical Deal Type",
-                options=list(_s.get("deal_type_codes", {}).values()),
-                help="Canonical label used in the dashboard",
-                required=True,
-            ),
-        },
-    )
-
-    # ── Section 4: DSP Name Aliases ─────────────────────────────────────
-    st.markdown("#### DSP Name Aliases")
-    st.caption(
-        "Normalize DSP names that appear under multiple spellings across SSPs. "
-        "Applied globally after combining Magnite, GAM, and Pubmatic data."
-    )
-    _dsp_alias_rows = [
-        {"Raw Value": k, "Canonical DSP Name": v}
-        for k, v in _s.get("dsp_aliases", {}).items()
-    ]
-    _dsp_alias_edit = st.data_editor(
-        pd.DataFrame(_dsp_alias_rows) if _dsp_alias_rows else pd.DataFrame(
-            columns=["Raw Value", "Canonical DSP Name"]
-        ),
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        key="settings_dsp_aliases",
-        column_config={
-            "Raw Value":         st.column_config.TextColumn("Raw Value", help="Exact string as it appears in the data", required=True),
-            "Canonical DSP Name": st.column_config.TextColumn("Canonical DSP Name", help="Preferred display name", required=True),
-        },
-    )
-
-    # ── Section 5: Format Name Aliases ──────────────────────────────────
-    st.markdown("#### Format Name Aliases")
-    st.caption(
-        "Normalize Format names that appear under multiple spellings across SSPs. "
-        "Applied globally after combining Magnite, GAM, and Pubmatic data."
-    )
-    _format_alias_rows = [
-        {"Raw Value": k, "Canonical Format Name": v}
-        for k, v in _s.get("format_aliases", {}).items()
-    ]
-    _format_alias_edit = st.data_editor(
-        pd.DataFrame(_format_alias_rows) if _format_alias_rows else pd.DataFrame(
-            columns=["Raw Value", "Canonical Format Name"]
-        ),
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        key="settings_format_aliases",
-        column_config={
-            "Raw Value":            st.column_config.TextColumn("Raw Value", help="Exact string as it appears in the data", required=True),
-            "Canonical Format Name": st.column_config.TextColumn("Canonical Format Name", help="Preferred display name", required=True),
-        },
-    )
-
-    # ── Section 6: Deal Source Aliases ──────────────────────────────────
-    st.markdown("#### Deal Source Aliases")
-    st.caption(
-        "Normalize Deal Source names that differ across SSPs (e.g. Magnite's 'Publisher Deals' → 'Publisher'). "
-        "Applied globally after combining all SSP data."
-    )
-    _deal_source_alias_rows = [
-        {"Raw Value": k, "Canonical Deal Source Name": v}
-        for k, v in _s.get("deal_source_aliases", {}).items()
-    ]
-    _deal_source_alias_edit = st.data_editor(
-        pd.DataFrame(_deal_source_alias_rows) if _deal_source_alias_rows else pd.DataFrame(
-            columns=["Raw Value", "Canonical Deal Source Name"]
-        ),
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        key="settings_deal_source_aliases",
-        column_config={
-            "Raw Value":                 st.column_config.TextColumn("Raw Value", help="Exact string as it appears in the data", required=True),
-            "Canonical Deal Source Name": st.column_config.TextColumn("Canonical Deal Source Name", help="Preferred display name", required=True),
-        },
-    )
-
-    # ── Section 7: Direct Campaign Sources ──────────────────────────────
-    st.markdown("#### Direct Campaign Sources")
-    st.caption(
-        "Each row is a direct-sold data source. **Order Name Prefix** filters the table to only direct campaigns. "
-        "Disabling a source hides it from the Direct Campaigns table."
-    )
-
-    _direct_rows = [
-        {
-            "Source Name":       s["name"],
-            "Enabled":           s.get("enabled", True),
-            "Database Table":    s["table"],
-            "Order Name Prefix": s.get("order_name_prefix", ""),
+        _map_col_cfg: dict = {
+            "Field": st.column_config.TextColumn("Field", disabled=True, width="small"),
         }
-        for s in _s.get("direct_sources", [])
-    ]
-    _direct_edit = st.data_editor(
-        pd.DataFrame(_direct_rows) if _direct_rows else pd.DataFrame(
-            columns=["Source Name", "Enabled", "Database Table", "Order Name Prefix"]
-        ),
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        key="settings_direct_sources_v2",
-        column_config={
-            "Source Name":       st.column_config.TextColumn("Source Name", required=True),
-            "Enabled":           st.column_config.CheckboxColumn("Enabled"),
-            "Database Table":    st.column_config.TextColumn(
-                "Database Table",
-                help="Table populated by refresh_cache.py (e.g. gam_campaigns)",
-            ),
-            "Order Name Prefix": st.column_config.TextColumn(
-                "Order Name Prefix",
-                help="Filter to orders whose name starts with this value (e.g. Newsweek_Direct)",
-            ),
-        },
-    )
+        for _sn in _edited_ssp_names:
+            _tbl = _ssp_table_map.get(_sn, "")
+            _map_col_cfg[_sn] = st.column_config.SelectboxColumn(
+                _sn,
+                options=_ssp_opts[_sn],
+                width="medium",
+                help=f"Source column from `{_tbl}`. N/A = not available. [auto] = parsed from deal name.",
+                required=False,
+            )
 
-    st.markdown("##### Excluded Advertiser Patterns")
-    st.caption("Line items whose advertiser name matches any of these patterns are hidden from the Direct Campaigns table. Supports regex (e.g. `\\[nw\\]`).")
-    _excl_rows = [{"Pattern": p} for p in _s.get("excluded_advertiser_patterns", [])]
-    _excl_edit = st.data_editor(
-        pd.DataFrame(_excl_rows) if _excl_rows else pd.DataFrame(columns=["Pattern"]),
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        key="settings_excluded_advertiser_patterns",
-        column_config={"Pattern": st.column_config.TextColumn("Pattern", help="Regex or plain string matched against the advertiser name")},
-    )
-
-    st.markdown("##### Direct Campaign Metrics and Dimensions Mapping")
-    st.caption(
-        "Map each display field to its source column in the database table. "
-        "Computed columns (seller_ae, advertiser, campaign_name, ad_format) are derived by the dashboard — "
-        "select them as-is or map to a raw column."
-    )
-
-    _DIRECT_FIELDS = [
-        "Seller", "Advertiser", "Campaign", "Line Item", "Format", "Status",
-        "Start Date", "End Date", "Goal", "CPM Rate",
-        "Delivered", "Impressions (1d)", "Remaining", "Clicks",
-        "Pacing %", "Viewability %", "CTR %", "Revenue", "VCR %",
-    ]
-    _DIRECT_COMPUTED = ["seller_ae", "salesperson", "advertiser", "campaign_name", "ad_format", "remaining_impressions"]
-
-    _existing_direct_maps = {s["name"]: s.get("columns", {}) for s in _s.get("direct_sources", [])}
-    _direct_src_names = [
-        str(r["Source Name"]).strip()
-        for _, r in _direct_edit.iterrows()
-        if pd.notna(r["Source Name"]) and str(r["Source Name"]).strip()
-    ]
-    _direct_table_map = {
-        str(r["Source Name"]).strip(): str(r.get("Database Table", "")).strip()
-        for _, r in _direct_edit.iterrows()
-        if pd.notna(r["Source Name"]) and str(r["Source Name"]).strip()
-    }
-
-    _direct_ssp_opts: dict = {}
-    for _dsn in _direct_src_names:
-        _dtbl = _direct_table_map.get(_dsn, "")
-        _dreal = _table_cols(_dtbl)
-        _dopts = ["N/A"] + _DIRECT_COMPUTED + [c for c in _dreal if c not in (["N/A"] + _DIRECT_COMPUTED)]
-        for _f in _DIRECT_FIELDS:
-            _cur = _existing_direct_maps.get(_dsn, {}).get(_f, "")
-            if _cur and _cur not in _dopts:
-                _dopts.append(_cur)
-        _direct_ssp_opts[_dsn] = _dopts
-
-    _direct_map_rows = []
-    for _f in _DIRECT_FIELDS:
-        _row2: dict = {"Field": _f}
-        for _dsn in _direct_src_names:
-            _raw = _existing_direct_maps.get(_dsn, {}).get(_f, "") or ""
-            _row2[_dsn] = _raw if _raw else "N/A"
-        _direct_map_rows.append(_row2)
-
-    _direct_map_col_cfg: dict = {
-        "Field": st.column_config.TextColumn("Field", disabled=True, width="small"),
-    }
-    for _dsn in _direct_src_names:
-        _dtbl = _direct_table_map.get(_dsn, "")
-        _direct_map_col_cfg[_dsn] = st.column_config.SelectboxColumn(
-            _dsn,
-            options=_direct_ssp_opts[_dsn],
-            width="medium",
-            help=f"Source column from `{_dtbl}`. Computed columns: seller_ae, advertiser, campaign_name, ad_format.",
-            required=False,
+        _map_edit = st.data_editor(
+            _map_df,
+            use_container_width=True,
+            hide_index=True,
+            key="settings_colmap",
+            column_config=_map_col_cfg,
+            disabled=["Field"],
         )
 
-    _direct_map_edit = st.data_editor(
-        pd.DataFrame(_direct_map_rows) if _direct_map_rows else pd.DataFrame(columns=["Field"]),
-        use_container_width=True,
-        hide_index=True,
-        key="settings_direct_colmap",
-        column_config=_direct_map_col_cfg,
-        disabled=["Field"],
-    )
+        # ── Section 3: Deal Type Value Aliases ──────────────────────────────
+        st.markdown("#### Deal Type Value Aliases")
+        st.caption(
+            "Map raw values returned by SSP APIs to canonical deal type labels. "
+            "For example, GAM's REST API returns \"Preferred Deals\" (plural) — alias it to "
+            "\"Preferred Deal\" so it matches the canonical label used across all SSPs."
+        )
+        _alias_rows = [
+            {"Raw Value": k, "Canonical Deal Type": v}
+            for k, v in _s.get("deal_type_aliases", {}).items()
+        ]
+        _alias_edit = st.data_editor(
+            pd.DataFrame(_alias_rows) if _alias_rows else pd.DataFrame(
+                columns=["Raw Value", "Canonical Deal Type"]
+            ),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="settings_deal_type_aliases",
+            column_config={
+                "Raw Value": st.column_config.TextColumn(
+                    "Raw Value", help="Exact string returned by the SSP API", required=True
+                ),
+                "Canonical Deal Type": st.column_config.SelectboxColumn(
+                    "Canonical Deal Type",
+                    options=list(_s.get("deal_type_codes", {}).values()),
+                    help="Canonical label used in the dashboard",
+                    required=True,
+                ),
+            },
+        )
 
-    # ── Section 4: Seller Mapping ────────────────────────────────────────
-    st.markdown("#### Seller Mapping")
-    st.caption("Maps short AE codes (from order and deal names) to full display names.")
+        # ── Section 4: DSP Name Aliases ─────────────────────────────────────
+        st.markdown("#### DSP Name Aliases")
+        st.caption(
+            "Normalize DSP names that appear under multiple spellings across SSPs. "
+            "Applied globally after combining Magnite, GAM, and Pubmatic data."
+        )
+        _dsp_alias_rows = [
+            {"Raw Value": k, "Canonical DSP Name": v}
+            for k, v in _s.get("dsp_aliases", {}).items()
+        ]
+        _dsp_alias_edit = st.data_editor(
+            pd.DataFrame(_dsp_alias_rows) if _dsp_alias_rows else pd.DataFrame(
+                columns=["Raw Value", "Canonical DSP Name"]
+            ),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="settings_dsp_aliases",
+            column_config={
+                "Raw Value":         st.column_config.TextColumn("Raw Value", help="Exact string as it appears in the data", required=True),
+                "Canonical DSP Name": st.column_config.TextColumn("Canonical DSP Name", help="Preferred display name", required=True),
+            },
+        )
 
-    _ae_rows = [{"Code": k, "Full Name": v} for k, v in sorted(_s["ae_names"].items())]
-    _ae_edit = st.data_editor(
-        pd.DataFrame(_ae_rows) if _ae_rows else pd.DataFrame(columns=["Code", "Full Name"]),
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        key="settings_ae",
-        column_config={
-            "Code":      st.column_config.TextColumn("Code", required=True, help="e.g. JAmalfi"),
-            "Full Name": st.column_config.TextColumn("Full Name", required=True, help="e.g. Julie Amalfi"),
-        },
-    )
+        # ── Section 5: Format Name Aliases ──────────────────────────────────
+        st.markdown("#### Format Name Aliases")
+        st.caption(
+            "Normalize Format names that appear under multiple spellings across SSPs. "
+            "Applied globally after combining Magnite, GAM, and Pubmatic data."
+        )
+        _format_alias_rows = [
+            {"Raw Value": k, "Canonical Format Name": v}
+            for k, v in _s.get("format_aliases", {}).items()
+        ]
+        _format_alias_edit = st.data_editor(
+            pd.DataFrame(_format_alias_rows) if _format_alias_rows else pd.DataFrame(
+                columns=["Raw Value", "Canonical Format Name"]
+            ),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="settings_format_aliases",
+            column_config={
+                "Raw Value":            st.column_config.TextColumn("Raw Value", help="Exact string as it appears in the data", required=True),
+                "Canonical Format Name": st.column_config.TextColumn("Canonical Format Name", help="Preferred display name", required=True),
+            },
+        )
 
-    # ── Section 4: Deal Type Mapping ─────────────────────────────────────
-    st.markdown("#### Deal Type Mapping")
-    st.caption("Maps abbreviations in deal/order names to display labels.")
+        # ── Section 6: Deal Source Aliases ──────────────────────────────────
+        st.markdown("#### Deal Source Aliases")
+        st.caption(
+            "Normalize Deal Source names that differ across SSPs (e.g. Magnite's 'Publisher Deals' → 'Publisher'). "
+            "Applied globally after combining all SSP data."
+        )
+        _deal_source_alias_rows = [
+            {"Raw Value": k, "Canonical Deal Source Name": v}
+            for k, v in _s.get("deal_source_aliases", {}).items()
+        ]
+        _deal_source_alias_edit = st.data_editor(
+            pd.DataFrame(_deal_source_alias_rows) if _deal_source_alias_rows else pd.DataFrame(
+                columns=["Raw Value", "Canonical Deal Source Name"]
+            ),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="settings_deal_source_aliases",
+            column_config={
+                "Raw Value":                 st.column_config.TextColumn("Raw Value", help="Exact string as it appears in the data", required=True),
+                "Canonical Deal Source Name": st.column_config.TextColumn("Canonical Deal Source Name", help="Preferred display name", required=True),
+            },
+        )
 
-    _dt_rows = [{"Code": k, "Label": v} for k, v in sorted(_s["deal_type_codes"].items())]
-    _dt_edit = st.data_editor(
-        pd.DataFrame(_dt_rows) if _dt_rows else pd.DataFrame(columns=["Code", "Label"]),
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        key="settings_dt",
-        column_config={
-            "Code":  st.column_config.TextColumn("Code", required=True, help="e.g. PA, PD, PG, PMP"),
-            "Label": st.column_config.TextColumn("Label", required=True, help="e.g. Private Auction"),
-        },
-    )
 
-    # ── Section 5: GAM Deal Report Upload ────────────────────────────────
-    st.divider()
-    st.markdown("#### Upload GAM Deal Report")
-    st.caption(
-        "GAM's programmatic API doesn't expose deal-level breakdown for Private Auction. "
-        "Export the report manually from GAM (Historical → Programmatic channel + Deal dimensions), "
-        "then upload the Excel file here to populate the PMP Deals table."
-    )
-    _uploaded = st.file_uploader(
-        "Upload GAM PMP report (.xlsx)",
-        type=["xlsx"],
-        key="gam_pmp_upload",
-        help="GAM Historical report with Programmatic channel, Deal, Order dimensions",
-    )
-    if _uploaded is not None:
-        try:
-            import openpyxl as _openpyxl  # noqa: F401
-            _xl = pd.read_excel(_uploaded, sheet_name=None)
-            # Find the data sheet (not the Properties sheet)
-            _data_sheet = next(
-                (s for s in _xl if s.lower() not in ("properties", "cover")), None
+    with _settings_direct_tab:
+        # ── Section 7: Direct Campaign Sources ──────────────────────────────
+        st.markdown("#### Direct Campaign Sources")
+        st.caption(
+            "Each row is a direct-sold data source. **Order Name Prefix** filters the table to only direct campaigns. "
+            "Disabling a source hides it from the Direct Campaigns table."
+        )
+
+        _direct_rows = [
+            {
+                "Source Name":       s["name"],
+                "Enabled":           s.get("enabled", True),
+                "Database Table":    s["table"],
+                "Order Name Prefix": s.get("order_name_prefix", ""),
+            }
+            for s in _s.get("direct_sources", [])
+        ]
+        _direct_edit = st.data_editor(
+            pd.DataFrame(_direct_rows) if _direct_rows else pd.DataFrame(
+                columns=["Source Name", "Enabled", "Database Table", "Order Name Prefix"]
+            ),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="settings_direct_sources_v2",
+            column_config={
+                "Source Name":       st.column_config.TextColumn("Source Name", required=True),
+                "Enabled":           st.column_config.CheckboxColumn("Enabled"),
+                "Database Table":    st.column_config.TextColumn(
+                    "Database Table",
+                    help="Table populated by refresh_cache.py (e.g. gam_campaigns)",
+                ),
+                "Order Name Prefix": st.column_config.TextColumn(
+                    "Order Name Prefix",
+                    help="Filter to orders whose name starts with this value (e.g. Newsweek_Direct)",
+                ),
+            },
+        )
+
+        st.markdown("##### Excluded Advertiser Patterns")
+        st.caption("Line items whose advertiser name matches any of these patterns are hidden from the Direct Campaigns table. Supports regex (e.g. `\\[nw\\]`).")
+        _excl_rows = [{"Pattern": p} for p in _s.get("excluded_advertiser_patterns", [])]
+        _excl_edit = st.data_editor(
+            pd.DataFrame(_excl_rows) if _excl_rows else pd.DataFrame(columns=["Pattern"]),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="settings_excluded_advertiser_patterns",
+            column_config={"Pattern": st.column_config.TextColumn("Pattern", help="Regex or plain string matched against the advertiser name")},
+        )
+
+        st.markdown("##### Direct Campaign Metrics and Dimensions Mapping")
+        st.caption(
+            "Map each display field to its source column in the database table. "
+            "Computed columns (seller_ae, advertiser, campaign_name, ad_format) are derived by the dashboard — "
+            "select them as-is or map to a raw column."
+        )
+
+        _DIRECT_FIELDS = [
+            "Seller", "Advertiser", "Campaign", "Line Item", "Format", "Status",
+            "Start Date", "End Date", "Goal", "CPM Rate",
+            "Delivered", "Impressions (1d)", "Remaining", "Clicks",
+            "Pacing %", "Viewability %", "CTR %", "Revenue", "VCR %",
+        ]
+        _DIRECT_COMPUTED = ["seller_ae", "salesperson", "advertiser", "campaign_name", "ad_format", "remaining_impressions"]
+
+        _existing_direct_maps = {s["name"]: s.get("columns", {}) for s in _s.get("direct_sources", [])}
+        _direct_src_names = [
+            str(r["Source Name"]).strip()
+            for _, r in _direct_edit.iterrows()
+            if pd.notna(r["Source Name"]) and str(r["Source Name"]).strip()
+        ]
+        _direct_table_map = {
+            str(r["Source Name"]).strip(): str(r.get("Database Table", "")).strip()
+            for _, r in _direct_edit.iterrows()
+            if pd.notna(r["Source Name"]) and str(r["Source Name"]).strip()
+        }
+
+        _direct_ssp_opts: dict = {}
+        for _dsn in _direct_src_names:
+            _dtbl = _direct_table_map.get(_dsn, "")
+            _dreal = _table_cols(_dtbl)
+            _dopts = ["N/A"] + _DIRECT_COMPUTED + [c for c in _dreal if c not in (["N/A"] + _DIRECT_COMPUTED)]
+            for _f in _DIRECT_FIELDS:
+                _cur = _existing_direct_maps.get(_dsn, {}).get(_f, "")
+                if _cur and _cur not in _dopts:
+                    _dopts.append(_cur)
+            _direct_ssp_opts[_dsn] = _dopts
+
+        _direct_map_rows = []
+        for _f in _DIRECT_FIELDS:
+            _row2: dict = {"Field": _f}
+            for _dsn in _direct_src_names:
+                _raw = _existing_direct_maps.get(_dsn, {}).get(_f, "") or ""
+                _row2[_dsn] = _raw if _raw else "N/A"
+            _direct_map_rows.append(_row2)
+
+        _direct_map_col_cfg: dict = {
+            "Field": st.column_config.TextColumn("Field", disabled=True, width="small"),
+        }
+        for _dsn in _direct_src_names:
+            _dtbl = _direct_table_map.get(_dsn, "")
+            _direct_map_col_cfg[_dsn] = st.column_config.SelectboxColumn(
+                _dsn,
+                options=_direct_ssp_opts[_dsn],
+                width="medium",
+                help=f"Source column from `{_dtbl}`. Computed columns: seller_ae, advertiser, campaign_name, ad_format.",
+                required=False,
             )
-            if _data_sheet is None:
-                st.error("Could not find a data sheet in the uploaded file.")
-            else:
-                _gam_upload_df = _xl[_data_sheet].copy()
-                # Normalise column names (no _snake helper in dashboard — do it inline)
-                import re as _re2
-                def _norm_col(s):
-                    s = _re2.sub(r"[^a-zA-Z0-9]+", "_", str(s)).strip("_").lower()
-                    return s
-                _gam_upload_df.columns = [_norm_col(c) for c in _gam_upload_df.columns]
-                # Identify key columns by pattern
-                _prog_col  = next((c for c in _gam_upload_df.columns if "programmatic" in c), None)
-                _deal_col  = next((c for c in _gam_upload_df.columns if c == "deal" or c.endswith("_deal")), None)
-                _order_col = next((c for c in _gam_upload_df.columns if "order" in c), None)
-                _impr_col  = next((c for c in _gam_upload_df.columns if "impression" in c and "comparison" not in c and "change" not in c), None)
-                _rev_col   = next((c for c in _gam_upload_df.columns if "revenue" in c and "comparison" not in c and "change" not in c), None)
-                _ecpm_col  = next((c for c in _gam_upload_df.columns if ("ecpm" in c or "e_cpm" in c) and "comparison" not in c and "change" not in c), None)
 
-                st.write(f"Detected columns — channel: `{_prog_col}`, deal: `{_deal_col}`, order: `{_order_col}`, impressions: `{_impr_col}`, revenue: `{_rev_col}`")
+        _direct_map_edit = st.data_editor(
+            pd.DataFrame(_direct_map_rows) if _direct_map_rows else pd.DataFrame(columns=["Field"]),
+            use_container_width=True,
+            hide_index=True,
+            key="settings_direct_colmap",
+            column_config=_direct_map_col_cfg,
+            disabled=["Field"],
+        )
 
-                if _deal_col:
-                    _out = pd.DataFrame({
-                        "date":            pd.Timestamp.now(tz="UTC").date().isoformat(),
-                        "deal_name":       _gam_upload_df[_deal_col],
-                        "programmatic_channel": _gam_upload_df[_prog_col] if _prog_col else None,
-                        "order_name":      _gam_upload_df[_order_col] if _order_col else None,
-                        "impressions":     pd.to_numeric(_gam_upload_df[_impr_col], errors="coerce") if _impr_col else None,
-                        "revenue":         pd.to_numeric(_gam_upload_df[_rev_col], errors="coerce") if _rev_col else None,
-                        "ecpm":            pd.to_numeric(_gam_upload_df[_ecpm_col], errors="coerce") if _ecpm_col else None,
-                    })
-                    _out = _out[_out["deal_name"].notna() & (_out["deal_name"].astype(str).str.startswith("Newsweek_"))]
-                    _out["_pulled_at"] = datetime.now(timezone.utc).isoformat()
-                    _out["source"] = "gam_upload"
+        # ── Section 4: Seller Mapping ────────────────────────────────────────
+        st.markdown("#### Seller Mapping")
+        st.caption("Maps short AE codes (from order and deal names) to full display names.")
 
-                    st.dataframe(_out.head(20), use_container_width=True, hide_index=True)
-                    st.write(f"**{len(_out)} deal rows detected**")
+        _ae_rows = [{"Code": k, "Full Name": v} for k, v in sorted(_s["ae_names"].items())]
+        _ae_edit = st.data_editor(
+            pd.DataFrame(_ae_rows) if _ae_rows else pd.DataFrame(columns=["Code", "Full Name"]),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="settings_ae",
+            column_config={
+                "Code":      st.column_config.TextColumn("Code", required=True, help="e.g. JAmalfi"),
+                "Full Name": st.column_config.TextColumn("Full Name", required=True, help="e.g. Julie Amalfi"),
+            },
+        )
 
-                    if st.button("📥  Import into gam_pmp_deals table", type="primary", key="gam_upload_confirm"):
-                        try:
-                            with _engine().begin() as _conn:
-                                _conn.execute(sqlalchemy.text(
-                                    'CREATE TABLE IF NOT EXISTS gam_pmp_deals '
-                                    '(date TEXT, deal_name TEXT, programmatic_channel TEXT, '
-                                    'order_name TEXT, impressions REAL, revenue REAL, ecpm REAL, '
-                                    '_pulled_at TEXT, source TEXT)'
-                                ))
-                                _conn.execute(sqlalchemy.text(
-                                    "DELETE FROM gam_pmp_deals WHERE source = 'gam_upload'"
-                                ))
-                            _out.to_sql("gam_pmp_deals", _engine(), if_exists="append", index=False)
-                            st.success(f"Imported {len(_out)} rows into gam_pmp_deals. Reload the Campaigns tab to see PA deals.")
-                            st.cache_data.clear()
-                        except Exception as _ue:
-                            st.error(f"Import failed: {_ue}")
+        # ── Section 4: Deal Type Mapping ─────────────────────────────────────
+        st.markdown("#### Deal Type Mapping")
+        st.caption("Maps abbreviations in deal/order names to display labels.")
+
+        _dt_rows = [{"Code": k, "Label": v} for k, v in sorted(_s["deal_type_codes"].items())]
+        _dt_edit = st.data_editor(
+            pd.DataFrame(_dt_rows) if _dt_rows else pd.DataFrame(columns=["Code", "Label"]),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="settings_dt",
+            column_config={
+                "Code":  st.column_config.TextColumn("Code", required=True, help="e.g. PA, PD, PG, PMP"),
+                "Label": st.column_config.TextColumn("Label", required=True, help="e.g. Private Auction"),
+            },
+        )
+
+        # ── Section 5: GAM Deal Report Upload ────────────────────────────────
+        st.divider()
+        st.markdown("#### Upload GAM Deal Report")
+        st.caption(
+            "GAM's programmatic API doesn't expose deal-level breakdown for Private Auction. "
+            "Export the report manually from GAM (Historical → Programmatic channel + Deal dimensions), "
+            "then upload the Excel file here to populate the PMP Deals table."
+        )
+        _uploaded = st.file_uploader(
+            "Upload GAM PMP report (.xlsx)",
+            type=["xlsx"],
+            key="gam_pmp_upload",
+            help="GAM Historical report with Programmatic channel, Deal, Order dimensions",
+        )
+        if _uploaded is not None:
+            try:
+                import openpyxl as _openpyxl  # noqa: F401
+                _xl = pd.read_excel(_uploaded, sheet_name=None)
+                # Find the data sheet (not the Properties sheet)
+                _data_sheet = next(
+                    (s for s in _xl if s.lower() not in ("properties", "cover")), None
+                )
+                if _data_sheet is None:
+                    st.error("Could not find a data sheet in the uploaded file.")
                 else:
-                    st.warning("Could not identify the Deal column in the uploaded file.")
-        except Exception as _ue:
-            st.error(f"Failed to parse file: {_ue}")
+                    _gam_upload_df = _xl[_data_sheet].copy()
+                    # Normalise column names (no _snake helper in dashboard — do it inline)
+                    import re as _re2
+                    def _norm_col(s):
+                        s = _re2.sub(r"[^a-zA-Z0-9]+", "_", str(s)).strip("_").lower()
+                        return s
+                    _gam_upload_df.columns = [_norm_col(c) for c in _gam_upload_df.columns]
+                    # Identify key columns by pattern
+                    _prog_col  = next((c for c in _gam_upload_df.columns if "programmatic" in c), None)
+                    _deal_col  = next((c for c in _gam_upload_df.columns if c == "deal" or c.endswith("_deal")), None)
+                    _order_col = next((c for c in _gam_upload_df.columns if "order" in c), None)
+                    _impr_col  = next((c for c in _gam_upload_df.columns if "impression" in c and "comparison" not in c and "change" not in c), None)
+                    _rev_col   = next((c for c in _gam_upload_df.columns if "revenue" in c and "comparison" not in c and "change" not in c), None)
+                    _ecpm_col  = next((c for c in _gam_upload_df.columns if ("ecpm" in c or "e_cpm" in c) and "comparison" not in c and "change" not in c), None)
+
+                    st.write(f"Detected columns — channel: `{_prog_col}`, deal: `{_deal_col}`, order: `{_order_col}`, impressions: `{_impr_col}`, revenue: `{_rev_col}`")
+
+                    if _deal_col:
+                        _out = pd.DataFrame({
+                            "date":            pd.Timestamp.now(tz="UTC").date().isoformat(),
+                            "deal_name":       _gam_upload_df[_deal_col],
+                            "programmatic_channel": _gam_upload_df[_prog_col] if _prog_col else None,
+                            "order_name":      _gam_upload_df[_order_col] if _order_col else None,
+                            "impressions":     pd.to_numeric(_gam_upload_df[_impr_col], errors="coerce") if _impr_col else None,
+                            "revenue":         pd.to_numeric(_gam_upload_df[_rev_col], errors="coerce") if _rev_col else None,
+                            "ecpm":            pd.to_numeric(_gam_upload_df[_ecpm_col], errors="coerce") if _ecpm_col else None,
+                        })
+                        _out = _out[_out["deal_name"].notna() & (_out["deal_name"].astype(str).str.startswith("Newsweek_"))]
+                        _out["_pulled_at"] = datetime.now(timezone.utc).isoformat()
+                        _out["source"] = "gam_upload"
+
+                        st.dataframe(_out.head(20), use_container_width=True, hide_index=True)
+                        st.write(f"**{len(_out)} deal rows detected**")
+
+                        if st.button("📥  Import into gam_pmp_deals table", type="primary", key="gam_upload_confirm"):
+                            try:
+                                with _engine().begin() as _conn:
+                                    _conn.execute(sqlalchemy.text(
+                                        'CREATE TABLE IF NOT EXISTS gam_pmp_deals '
+                                        '(date TEXT, deal_name TEXT, programmatic_channel TEXT, '
+                                        'order_name TEXT, impressions REAL, revenue REAL, ecpm REAL, '
+                                        '_pulled_at TEXT, source TEXT)'
+                                    ))
+                                    _conn.execute(sqlalchemy.text(
+                                        "DELETE FROM gam_pmp_deals WHERE source = 'gam_upload'"
+                                    ))
+                                _out.to_sql("gam_pmp_deals", _engine(), if_exists="append", index=False)
+                                st.success(f"Imported {len(_out)} rows into gam_pmp_deals. Reload the Campaigns tab to see PA deals.")
+                                st.cache_data.clear()
+                            except Exception as _ue:
+                                st.error(f"Import failed: {_ue}")
+                    else:
+                        st.warning("Could not identify the Deal column in the uploaded file.")
+            except Exception as _ue:
+                st.error(f"Failed to parse file: {_ue}")
 
     # ── Save ─────────────────────────────────────────────────────────────
     st.divider()
