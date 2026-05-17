@@ -1535,24 +1535,6 @@ with tab_seller:
     st.session_state["_pmp_formats_opts"]      = sorted(combined_pmp["Format"].dropna().unique().tolist())
     st.session_state["_pmp_deal_sources_opts"] = sorted(combined_pmp["Deal Source"].dropna().unique().tolist()) if "Deal Source" in combined_pmp.columns else []
 
-    with st.expander("🔍 Debug: PMP data sources", expanded=False):
-        _dbg = {
-            "Pubmatic rows (pre-filter)": len(pmp_summary),
-            "Magnite rows (pre-filter)": len(_magnite_summary),
-            "GAM rows (pre-filter)": len(_gam_summary),
-            "GAM PA metadata rows": len(load("gam_pa_metadata")) if not load("gam_pa_metadata").empty else 0,
-            "Magnite deal types": _magnite_summary["Deal Type"].value_counts().to_dict() if not _magnite_summary.empty else "EMPTY",
-            "GAM deal types": _gam_summary["Deal Type"].value_counts().to_dict() if not _gam_summary.empty else "EMPTY",
-            "Active SSP filter": sel_pmp_ssps or "none",
-            "Active Deal Type filter": sel_pmp_deal_types or "none",
-            "Active DSP filter": sel_pmp_dsps or "none",
-            "Active Format filter": sel_pmp_formats or "none",
-            "Active Deal Source filter": sel_pmp_deal_sources or "none",
-        }
-        if _load_errors:
-            _dbg["DB LOAD ERRORS"] = _load_errors
-        st.json(_dbg)
-
     _combined_prefilter = combined_pmp.copy()
 
     if sel_pmp_ssps:
