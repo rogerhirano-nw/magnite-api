@@ -853,7 +853,12 @@ with tab_seller:
         gam_df = gam_df.copy()
         _direct_src = next((s for s in _cfg.get("direct_sources", []) if s.get("enabled", True)), None)
         _direct_prefix = _direct_src.get("order_name_prefix", "Newsweek_Direct") if _direct_src else "Newsweek_Direct"
-        gam_df = gam_df[gam_df["order_name"].str.startswith(_direct_prefix, na=False)]
+        # Use order_name when populated; fall back to line_item_name prefix for rows
+        # where order_name hasn't been fetched yet (NULL from older refresh runs).
+        _order_populated = gam_df["order_name"].notna() & (gam_df["order_name"] != "")
+        _match_order = _order_populated & gam_df["order_name"].str.startswith(_direct_prefix, na=False)
+        _match_li = (~_order_populated) & gam_df["line_item_name"].str.startswith(_direct_prefix, na=False)
+        gam_df = gam_df[_match_order | _match_li]
         gam_df = gam_df[~gam_df["order_name"].str.startswith("Newsweek_Test", na=False)]
 
         for datecol in ("start_date", "end_date"):
