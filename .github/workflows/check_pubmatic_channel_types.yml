@@ -13,7 +13,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
-      - name: Query deal_type_id distribution
+      - name: Query all ID columns
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
@@ -22,25 +22,40 @@ jobs:
           from sqlalchemy import text
           engine = sqlalchemy.create_engine(os.environ["DATABASE_URL"])
           with engine.connect() as conn:
-              r = conn.execute(text("""
-                  SELECT deal_type_id, deal_type,
-                         COUNT(DISTINCT deal) as distinct_deals
+              # All columns in the table
+              r = conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name = 'pubmatic_deals' ORDER BY ordinal_position"))
+              print("Columns:", [row[0] for row in r])
+
+              # Distinct deal_source_id and deal_source
+              r2 = conn.execute(text("""
+                  SELECT deal_source_id, deal_source, COUNT(*) as cnt
                   FROM pubmatic_deals
-                  GROUP BY deal_type_id, deal_type
-                  ORDER BY distinct_deals DESC
+                  GROUP BY deal_source_id, deal_source
+                  ORDER BY cnt DESC
               """))
-              print("deal_type_id | deal_type | distinct_deals")
-              for row in r:
+              print("\ndeal_source_id / deal_source values:")
+              for row in r2:
                   print(dict(row._mapping))
 
-              # Show sample deal names for the unknown IDs
-              r2 = conn.execute(text("""
-                  SELECT DISTINCT deal_type_id, deal_type, deal
+              # Distinct ad_format_id and ad_format
+              r3 = conn.execute(text("""
+                  SELECT ad_format_id, ad_format, COUNT(*) as cnt
                   FROM pubmatic_deals
-                  WHERE deal_type_id NOT IN (1, 5)
-                  LIMIT 20
+                  GROUP BY ad_format_id, ad_format
+                  ORDER BY cnt DESC
               """))
-              print("\nDeals with non-standard channel type IDs:")
-              for row in r2:
+              print("\nad_format_id / ad_format values:")
+              for row in r3:
+                  print(dict(row._mapping))
+
+              # Distinct deal_type_id and deal_type
+              r4 = conn.execute(text("""
+                  SELECT deal_type_id, deal_type, COUNT(*) as cnt
+                  FROM pubmatic_deals
+                  GROUP BY deal_type_id, deal_type
+                  ORDER BY cnt DESC
+              """))
+              print("\ndeal_type_id / deal_type values:")
+              for row in r4:
                   print(dict(row._mapping))
           PYEOF
