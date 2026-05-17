@@ -164,6 +164,7 @@ _DEFAULT_SETTINGS: dict = {
         "Private Marketplace Deal": "Private Marketplace",
     },
     "excluded_advertiser_patterns": [r"\[nw\]"],
+    "default_statuses": ["Delivering", "Upcoming"],
     "direct_sources": [
         {
             "name": "GAM Direct",
@@ -959,14 +960,14 @@ with tab_seller:
             )
         with f4:
             status_opts = sorted(gam_df["status"].dropna().unique()) if "status" in gam_df.columns else []
-            _status_defaults = [s for s in ["Delivering", "Upcoming"] if s in status_opts]
-            _cur_status = st.session_state.get("gam_status_filter")
-            if not _cur_status or not any(s in status_opts for s in _cur_status):
-                st.session_state["gam_status_filter"] = _status_defaults
+            _cfg_defaults = _cfg.get("default_statuses", ["Delivering", "Upcoming"])
+            _status_defaults = [s for s in _cfg_defaults if s in status_opts]
+            if "gam_status_filter_v3" not in st.session_state:
+                st.session_state["gam_status_filter_v3"] = _status_defaults
             selected_statuses = st.multiselect(
                 "Status",
                 options=status_opts,
-                key="gam_status_filter",
+                key="gam_status_filter_v3",
             )
 
         view_gam = gam_df if selected_seller == "All" else gam_df[gam_df["seller_ae"] == selected_seller].copy()
@@ -1861,6 +1862,16 @@ with tab_settings:
             column_config={"Pattern": st.column_config.TextColumn("Pattern", help="Regex or plain string matched against the advertiser name")},
         )
 
+        st.markdown("##### Default Status Filter")
+        st.caption("Statuses pre-selected when the Direct Campaigns table first loads.")
+        _all_known_statuses = ["Delivering", "Upcoming", "Completed", "Paused", "Paused inventory released", "Inactive"]
+        _default_statuses_edit = st.multiselect(
+            "Default statuses",
+            options=_all_known_statuses,
+            default=_s.get("default_statuses", ["Delivering", "Upcoming"]),
+            key="settings_default_statuses",
+        )
+
         st.markdown("##### Direct Campaign Metrics and Dimensions Mapping")
         st.caption(
             "Map each display field to its source column in the database table. "
@@ -2140,6 +2151,7 @@ with tab_settings:
                 "dsp_aliases": _new_dsp_aliases, "format_aliases": _new_format_aliases,
                 "deal_source_aliases": _new_deal_source_aliases,
                 "excluded_advertiser_patterns": _new_excl_patterns,
+                "default_statuses": list(_default_statuses_edit),
                 "direct_sources": _new_direct,
             })
             st.cache_data.clear()
