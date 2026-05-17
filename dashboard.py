@@ -1260,6 +1260,16 @@ with tab_seller:
     if _mag_types and _ssp_enabled.get("Magnite", True):
         try:
             _mag_df = load("magnite_deal_daily").copy()
+            # Merge demand fields from the separate report (demand_type_ad_resp and
+            # revenue_source can't be fetched alongside auction metrics in the same call).
+            _mag_demand = load("magnite_deal_demand")
+            if not _mag_demand.empty and "deal_id" in _mag_demand.columns and "deal_id" in _mag_df.columns:
+                _demand_cols = [c for c in ["deal_id", "demand_type_ad_resp", "revenue_source"] if c in _mag_demand.columns]
+                _demand_lookup = (
+                    _mag_demand[_demand_cols]
+                    .drop_duplicates(subset=["deal_id"])
+                )
+                _mag_df = _mag_df.merge(_demand_lookup, on="deal_id", how="left")
             if not _mag_df.empty and "deal" in _mag_df.columns:
                 _dt_aliases = _cfg.get("deal_type_aliases", {})
                 # _parse_deal() is primary; demand_type_ad_resp is fallback for unrecognized deal names.

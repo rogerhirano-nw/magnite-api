@@ -64,7 +64,7 @@ REPORTS = {
         "date_range": "last_7",
     },
     "magnite_deal_daily": {
-        "dimensions": ["date", "deal", "deal_id", "demand_type_ad_resp", "revenue_source"],  # partner/ad_format not returned by API; derived from deal name in dashboard
+        "dimensions": ["date", "deal", "deal_id"],  # partner/ad_format not returned by API; derived from deal name in dashboard
         "metrics": [
             "bid_requests",
             "bid_responses",
@@ -74,6 +74,19 @@ REPORTS = {
             "seller_net_revenue",
             "ecpm",
             "win_rate",
+        ],
+        "date_range": "last_7",
+    },
+    # demand_type_ad_resp and revenue_source are "Demand Fields" — incompatible with auction
+    # metrics (bid_requests, bid_responses, impressions). Pull separately with ad metrics only
+    # and join to magnite_deal_daily in the dashboard.
+    "magnite_deal_demand": {
+        "dimensions": ["date", "deal", "deal_id", "demand_type_ad_resp", "revenue_source"],
+        "metrics": [
+            "paid_impression",
+            "publisher_gross_revenue",
+            "seller_net_revenue",
+            "ecpm",
         ],
         "date_range": "last_7",
     },
