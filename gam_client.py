@@ -423,7 +423,11 @@ class GAMClient:
 
         # Replace placeholders with real values from the reporting API.
         if "status_api" in merged.columns:
+            _had_no_api_status = merged["status_api"].isna()
             merged["status"] = merged["status_api"].fillna(merged["status"])
+            # Items with no delivery history that the date logic called "Delivering" are actually
+            # paused or not yet live — a truly delivering line item would have impression data.
+            merged.loc[_had_no_api_status & (merged["status"] == "Delivering"), "status"] = "Paused"
             merged = merged.drop(columns=["status_api"])
         if "salesperson_api" in merged.columns:
             merged["salesperson"] = merged["salesperson_api"].fillna(merged["salesperson"])
