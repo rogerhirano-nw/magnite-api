@@ -874,8 +874,16 @@ with tab_seller:
             gam_df["vcr"] = (_completions / _starts * 100).where(_starts > 0)
 
         # Extract seller — prefer GAM salesperson field, fall back to name regex
+        # GAM returns "Newsweek - Sales - Full Name (email)" — normalize to just the name.
+        def _parse_gam_salesperson(val):
+            if not isinstance(val, str):
+                return None
+            # Extract name between last " - " and " ("
+            m = re.search(r"-\s*([^-(]+?)\s*(?:\(|$)", val)
+            return m.group(1).strip() if m else val.strip()
+
         if "salesperson" in gam_df.columns and gam_df["salesperson"].notna().any():
-            gam_df["seller_ae"] = gam_df["salesperson"]
+            gam_df["seller_ae"] = gam_df["salesperson"].apply(_parse_gam_salesperson)
             _null_mask = gam_df["seller_ae"].isna()
             if _null_mask.any():
                 _regex_seller = (
