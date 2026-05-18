@@ -487,7 +487,12 @@ class GAMClient:
     # Combined pacing report
     # ------------------------------------------------------------------
 
-    def run_report_with_pacing(self, start_date: date, end_date: date) -> pd.DataFrame:
+    def run_report_with_pacing(
+        self,
+        start_date: date,
+        end_date: date,
+        return_delivery: bool = False,
+    ):
         """
         Combine delivery data with line-item metadata and compute pacing metrics.
 
@@ -496,7 +501,9 @@ class GAMClient:
                           (days_elapsed / total_days) * 100
             vcr         — video_completions / video_starts * 100
 
-        Returns the merged DataFrame.
+        Returns the merged DataFrame, or a (merged, df_delivery) tuple when
+        return_delivery=True so callers can persist the per-day breakdown
+        without paying for a second GAM report.
         """
         df_delivery = self.run_delivery_report(start_date, end_date)
         df_items = self.get_active_line_items()
@@ -634,4 +641,6 @@ class GAMClient:
         merged["report_start"] = start_date.isoformat()
         merged["report_end"] = end_date.isoformat()
 
+        if return_delivery:
+            return merged, df_delivery
         return merged

@@ -134,12 +134,13 @@ def refresh_gam() -> int:
     yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
     seven_days_ago = yesterday - timedelta(days=6)  # last 7 days inclusive
 
-    df = gam.run_report_with_pacing(seven_days_ago, yesterday)
+    df, df_daily = gam.run_report_with_pacing(seven_days_ago, yesterday, return_delivery=True)
     if df.empty:
         logger.warning("GAM report came back empty — nothing to write")
         return 0
 
-    df["_pulled_at"] = datetime.now(timezone.utc).isoformat()
+    pulled_at = datetime.now(timezone.utc).isoformat()
+    df["_pulled_at"] = pulled_at
     df["source"] = "gam"
     df["campaign_type"] = "direct"
 
@@ -160,6 +161,23 @@ def refresh_gam() -> int:
         df.to_sql(table, conn, if_exists="append", index=False)
 
     logger.info("Wrote %d rows to %s", len(df), table)
+
+    # Persist the per-line-item per-day breakdown that powers the 7-day table
+    # in daily_seller_report.py. Cache window matches the 7-day pull.
+    daily_table = "gam_campaigns_daily"
+    if df_daily is not None and not df_daily.empty:
+        df_daily = df_daily.copy()
+        df_daily["_pulled_at"] = pulled_at
+        with _engine().begin() as conn:
+            if daily_table in sa_inspect(conn).get_table_names():
+                existing_cols = {c["name"] for c in sa_inspect(conn).get_columns(daily_table)}
+                if existing_cols != set(df_daily.columns):
+                    logger.info("Schema change detected for %s — dropping and recreating", daily_table)
+                    conn.execute(text(f'DROP TABLE "{daily_table}"'))
+                else:
+                    conn.execute(text(f'DELETE FROM "{daily_table}"'))
+            df_daily.to_sql(daily_table, conn, if_exists="append", index=False)
+        logger.info("Wrote %d rows to %s", len(df_daily), daily_table)
 
     # Diagnostic: log every distinct order name prefix so we can find PA line items.
     if "order_name" in df.columns:

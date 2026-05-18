@@ -1,0 +1,42 @@
+name: Daily seller campaign report
+
+# 12:00 UTC = 8:00 AM EDT (7:00 AM EST). Refresh runs at 09:00 UTC (5 AM ET),
+# so gam_campaigns + gam_campaigns_daily are already fresh by the time this fires.
+on:
+  schedule:
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Route all emails to DRY_RUN_TO instead of the AEs'
+        required: false
+        default: '1'
+        type: choice
+        options: ['1', '0']
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.11'
+
+      - run: pip install -r requirements.txt
+
+      - run: python daily_seller_report.py
+        env:
+          DATABASE_URL:        ${{ secrets.DATABASE_URL }}
+          AGENTMAIL_API_KEY:   ${{ secrets.AGENTMAIL_API_KEY }}
+          AGENTMAIL_INBOX_ID:  ${{ secrets.AGENTMAIL_INBOX_ID }}
+          ADOPS_EMAIL:         ${{ secrets.ADOPS_EMAIL }}
+          DRY_RUN_TO:          ${{ secrets.DRY_RUN_TO }}
+          # Scheduled runs default to dry-run; workflow_dispatch can flip it via input.
+          DRY_RUN:             ${{ github.event.inputs.dry_run || '1' }}
