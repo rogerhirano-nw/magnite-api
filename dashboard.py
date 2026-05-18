@@ -210,7 +210,8 @@ _DEFAULT_SETTINGS: dict = {
                 "Delivered":     "lifetime_impressions_delivered",
                 "Remaining":     "remaining_impressions",
                 "Clicks":        "ad_server_clicks",
-                "Pacing %":      "pacing_pct",
+                "Pace":          "pacing_pct",
+                "Δ":             "pacing_delta",
                 "Viewability %": "ad_server_active_view_viewable_impressions_rate",
                 "CTR %":         "ad_server_ctr",
                 "VCR %":         "vcr",
@@ -1249,12 +1250,24 @@ with tab_seller:
                     axis=1,
                 )
             if "pacing_pct" in view_gam.columns:
-                view_gam["pacing_pct"] = view_gam.apply(
-                    lambda r: _fmt_pct_annot(r.get("pacing_pct"),
-                                              r.get("pacing_pct"),
-                                              r.get("pacing_prior_pct")),
-                    axis=1,
+                # Pace is rendered as a colored pill (background-color),
+                # with the delta annotation in a separate 'Δ' column so the
+                # box only wraps the percent. Show integer percent in the
+                # pill; tenths in the annotation.
+                _pacing_numeric = pd.to_numeric(view_gam["pacing_pct"], errors="coerce")
+                view_gam["pacing_pct"] = _pacing_numeric.apply(
+                    lambda v: "" if pd.isna(v) else f"{int(round(v))}%"
                 )
+                def _pace_delta(row):
+                    v1 = _pacing_numeric.loc[row.name]
+                    v2 = row.get("pacing_prior_pct")
+                    if pd.isna(v1) or pd.isna(v2): return ""
+                    d = v1 - v2
+                    if abs(d) < 0.05: return ""
+                    arrow = "▲" if d >= 0 else "▼"
+                    sign  = "+"  if d > 0  else ""
+                    return f"{arrow} {sign}{d:.1f}pp"
+                view_gam["pacing_delta"] = view_gam.apply(_pace_delta, axis=1)
             if "ad_server_active_view_viewable_impressions_rate" in view_gam.columns:
                 # Primary stays = the 7-day mean viewability rate (already 0-100).
                 # Annotation = 1d rate - 2d rate pp delta. Below-70 is conveyed
@@ -1340,7 +1353,9 @@ with tab_seller:
                     "cpm_rate": "CPM Rate",
                     "lifetime_impressions_delivered": "Delivered",
                     "remaining_impressions": "Remaining",
-                    "ad_server_clicks": "Clicks", "pacing_pct": "Pacing %",
+                    "ad_server_clicks": "Clicks",
+                    "pacing_pct":   "Pace",
+                    "pacing_delta": "Δ",
                     "ad_server_active_view_viewable_impressions_rate": "Viewability %",
                     "ad_server_ctr": "CTR %",
                     "vcr": "VCR %",
@@ -1382,8 +1397,11 @@ with tab_seller:
             # strings ("X (▲ +Y)"), not raw numbers.
             if "Clicks" in table_df.columns:
                 col_config["Clicks"] = st.column_config.TextColumn("Clicks", width="medium")
-            if "Pacing %" in table_df.columns:
-                col_config["Pacing %"] = st.column_config.TextColumn("Pacing %", width="medium")
+            if "Pace" in table_df.columns:
+                col_config["Pace"] = st.column_config.TextColumn("Pace", width="small")
+            if "Δ" in table_df.columns:
+                col_config["Δ"] = st.column_config.TextColumn("Δ", width="small",
+                    help="Pace change vs prior day (percentage points)")
             if "Viewability %" in table_df.columns:
                 col_config["Viewability %"] = st.column_config.TextColumn("Viewability %", width="medium")
             if "VCR %" in table_df.columns:
@@ -1465,12 +1483,28 @@ with tab_seller:
             styled_df = table_df.style
             if any(c in table_df.columns for c in _BENCH_COLS):
                 styled_df = styled_df.apply(_benchmark_row_styles, axis=1)
-            if "Pacing %" in table_df.columns:
+            if "Pace" in table_df.columns:
                 _pacing_target = float(_cfg.get("pacing_target_pct", 100.0) or 100.0)
-                styled_df = styled_df.map(
-                    lambda v, _t=_pacing_target: _ramp_color(_parse_leading_pct(v), _t),
-                    subset=["Pacing %"],
-                )
+                # Pace cell is a colored pill — background-color + light-text
+                # combination, no fill when close to target (within 10pp).
+                # Match the screenshot: red/brown for <75% of target, olive
+                # for moderately off, transparent for in-band, olive for over.
+                def _pace_pill(v, target=_pacing_target):
+                    pct = _parse_leading_pct(v)
+                    if pct is None or target <= 0:
+                        return ""
+                    ratio = pct / target
+                    if 0.90 <= ratio <= 1.10:
+                        return ""  # in-band — no pill
+                    if ratio < 0.75:  # significantly under-pacing → red
+                        bg, fg = "hsl(0, 35%, 25%)", "hsl(0, 30%, 80%)"
+                    else:               # moderately off (either side) → olive
+                        bg, fg = "hsl(48, 45%, 22%)", "hsl(48, 35%, 75%)"
+                    return (
+                        f"background-color: {bg}; color: {fg}; "
+                        f"border-radius: 6px; padding: 2px 10px; font-weight: 600"
+                    )
+                styled_df = styled_df.map(_pace_pill, subset=["Pace"])
             if "Status" in table_df.columns:
                 styled_df = styled_df.map(_status_color, subset=["Status"])
             if "Seller" in table_df.columns:
@@ -2337,9 +2371,9 @@ with tab_settings:
             "Seller", "Advertiser", "Campaign", "Line Item", "Format", "Status",
             "Start Date", "End Date", "Goal", "CPM Rate",
             "Delivered", "Remaining", "Clicks",
-            "Pacing %", "Viewability %", "CTR %", "Revenue", "VCR %",
+            "Pace", "Δ", "Viewability %", "CTR %", "VCR %", "Revenue",
         ]
-        _DIRECT_COMPUTED = ["seller_ae", "salesperson", "advertiser", "campaign_name", "ad_format", "remaining_impressions"]
+        _DIRECT_COMPUTED = ["seller_ae", "salesperson", "advertiser", "campaign_name", "ad_format", "remaining_impressions", "pacing_delta"]
 
         _existing_direct_maps = {s["name"]: s.get("columns", {}) for s in _s.get("direct_sources", [])}
         _direct_src_names = [
