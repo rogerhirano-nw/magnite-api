@@ -1118,24 +1118,6 @@ with tab_seller:
                 if pd.isna(d): return ""
                 return "▲" if d >= 0 else "▼"
 
-            def _fmt_count(v1, v2):
-                if pd.isna(v1): return ""
-                base = f"{int(v1):,}"
-                if pd.isna(v2): return base
-                d = int(v1) - int(v2)
-                sign = "+" if d > 0 else ""
-                return f"{base} ({_arrow(d)} {sign}{d:,} vs prior day)"
-
-            def _fmt_pct(v1, v2, below=None):
-                if pd.isna(v1): return ""
-                base = f"{v1:.1f}%"
-                if below is not None and v1 < below:
-                    base += f" (below {int(below)}%)"
-                if pd.isna(v2): return base
-                d = v1 - v2
-                sign = "+" if d > 0 else ""
-                return f"{base} ({_arrow(d)} {sign}{d:.1f}pp vs prior day)"
-
             # Per-day viewability rate from the new viewable/measurable counts.
             for _suf in ("1d", "2d"):
                 _viewable  = f"viewable_imps_{_suf}"
@@ -1180,26 +1162,61 @@ with tab_seller:
 
             # Build annotated strings — overwrite the numeric columns the table
             # already references so the existing display_cols mapping picks them up.
+            # The PRIMARY value displayed in each cell is unchanged from before
+            # (Impressions: 1d, Clicks: 7-day sum, Pacing: cumulative, Viewability:
+            # 7-day mean rate). The parenthetical annotation adds a yesterday-vs-
+            # day-before trend indicator for visual context only.
+            def _fmt_count_annot(primary, v1, v2):
+                """Cell value = `primary`; annotation = delta of v1 vs v2."""
+                if pd.isna(primary): return ""
+                base = f"{int(primary):,}"
+                if pd.isna(v1) or pd.isna(v2): return base
+                d = int(v1) - int(v2)
+                sign = "+" if d > 0 else ""
+                return f"{base} ({_arrow(d)} {sign}{d:,} vs prior day)"
+
+            def _fmt_pct_annot(primary, v1, v2, below=None):
+                """Cell value = `primary` (already 0-100 percent); annotation = pp delta of v1 vs v2."""
+                if pd.isna(primary): return ""
+                base = f"{primary:.1f}%"
+                if below is not None and primary < below:
+                    base += f" (below {int(below)}%)"
+                if pd.isna(v1) or pd.isna(v2): return base
+                d = v1 - v2
+                sign = "+" if d > 0 else ""
+                return f"{base} ({_arrow(d)} {sign}{d:.1f}pp vs prior day)"
+
             if "impressions_1d" in view_gam.columns:
+                # The "Impressions (1d)" column was already showing yesterday's count.
+                # Primary stays = impressions_1d. Annotation = 1d - 2d delta.
                 view_gam["impressions_1d"] = view_gam.apply(
-                    lambda r: _fmt_count(r.get("impressions_1d"), r.get("impressions_2d")),
+                    lambda r: _fmt_count_annot(r.get("impressions_1d"),
+                                                r.get("impressions_1d"),
+                                                r.get("impressions_2d")),
                     axis=1,
                 )
-            if "clicks_1d" in view_gam.columns:
-                # Repurpose the existing "Clicks" column to show yesterday's clicks
-                # with delta. The 7-day sum was less actionable than 1-day in any case.
+            if "ad_server_clicks" in view_gam.columns:
+                # Primary stays = ad_server_clicks (7-day sum, what it was before).
+                # Annotation = 1d - 2d delta (daily trend indicator).
                 view_gam["ad_server_clicks"] = view_gam.apply(
-                    lambda r: _fmt_count(r.get("clicks_1d"), r.get("clicks_2d")),
+                    lambda r: _fmt_count_annot(r.get("ad_server_clicks"),
+                                                r.get("clicks_1d"),
+                                                r.get("clicks_2d")),
                     axis=1,
                 )
             if "pacing_pct" in view_gam.columns:
                 view_gam["pacing_pct"] = view_gam.apply(
-                    lambda r: _fmt_pct(r.get("pacing_pct"), r.get("pacing_prior_pct")),
+                    lambda r: _fmt_pct_annot(r.get("pacing_pct"),
+                                              r.get("pacing_pct"),
+                                              r.get("pacing_prior_pct")),
                     axis=1,
                 )
-            if "viewability_rate_1d" in view_gam.columns:
+            if "ad_server_active_view_viewable_impressions_rate" in view_gam.columns:
+                # Primary stays = the 7-day mean viewability rate (already 0-100).
+                # Annotation = 1d rate - 2d rate pp delta.
                 view_gam["ad_server_active_view_viewable_impressions_rate"] = view_gam.apply(
-                    lambda r: _fmt_pct(
+                    lambda r: _fmt_pct_annot(
+                        r.get("ad_server_active_view_viewable_impressions_rate"),
                         r.get("viewability_rate_1d"),
                         r.get("viewability_rate_2d"),
                         below=70,
