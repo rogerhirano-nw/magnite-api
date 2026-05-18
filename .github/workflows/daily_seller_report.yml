@@ -1,0 +1,61 @@
+name: Daily seller campaign report
+
+# 12:00 UTC = 8:00 AM EDT (7:00 AM EST). Refresh runs at 09:00 UTC (5 AM ET),
+# so gam_campaigns + gam_campaigns_daily are already fresh by the time this fires.
+on:
+  schedule:
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Route email to DRY_RUN_TO and Teams to TEAMS_DRY_RUN_WEBHOOK; suppress @mentions'
+        required: false
+        default: '1'
+        type: choice
+        options: ['1', '0']
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.11'
+
+      - run: pip install -r requirements.txt
+
+      - run: python daily_seller_report.py
+        env:
+          DATABASE_URL:           ${{ secrets.DATABASE_URL }}
+          AGENTMAIL_API_KEY:      ${{ secrets.AGENTMAIL_API_KEY }}
+          AGENTMAIL_INBOX_ID:     ${{ secrets.AGENTMAIL_INBOX_ID }}
+          ADOPS_EMAIL:            ${{ secrets.ADOPS_EMAIL }}
+          DRY_RUN_TO:             ${{ secrets.DRY_RUN_TO }}
+          # Teams channel-email route: when set (and DRY_RUN=0), each AE's
+          # email is Cc'd to this address and appears as a channel post.
+          # No OAuth required. Lower fidelity than the Adaptive Card path
+          # below — no @mentions, plain email rendering — but works today.
+          TEAMS_CHANNEL_EMAIL:    ${{ secrets.TEAMS_CHANNEL_EMAIL }}
+          # Single Teams Workflow URL for the shared #adops-daily channel.
+          # Each AE's card is posted there and @mentions the AE so they get pinged.
+          # TEAMS_DRY_RUN_WEBHOOK is optional — defaults to TEAMS_WEBHOOK_URL
+          # (mentions are suppressed in DRY_RUN regardless).
+          TEAMS_WEBHOOK_URL:      ${{ secrets.TEAMS_WEBHOOK_URL }}
+          TEAMS_DRY_RUN_WEBHOOK:  ${{ secrets.TEAMS_DRY_RUN_WEBHOOK }}
+          DASHBOARD_URL:          ${{ secrets.DASHBOARD_URL }}
+          # Entra ID OAuth client credentials for the Power Automate
+          # "Direct API" mode. Required for flows hosted at
+          # *.environment.api.powerplatform.com (newer Microsoft tenants).
+          # Leave unset to fall back to URL-only auth on older flow hosts.
+          ENTRA_TENANT_ID:        ${{ secrets.ENTRA_TENANT_ID }}
+          ENTRA_CLIENT_ID:        ${{ secrets.ENTRA_CLIENT_ID }}
+          ENTRA_CLIENT_SECRET:    ${{ secrets.ENTRA_CLIENT_SECRET }}
+          # Scheduled runs default to dry-run; workflow_dispatch can flip it via input.
+          DRY_RUN:                ${{ github.event.inputs.dry_run || '1' }}
