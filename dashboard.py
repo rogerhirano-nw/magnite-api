@@ -1252,6 +1252,29 @@ with tab_seller:
                     axis=1,
                 )
 
+            # Per-day CTR (clicks / impressions) for the annotation delta.
+            for _suf in ("1d", "2d"):
+                _cl = f"clicks_{_suf}"
+                _im = f"impressions_{_suf}"
+                if _cl in view_gam.columns and _im in view_gam.columns:
+                    view_gam[f"ctr_rate_{_suf}"] = view_gam.apply(
+                        lambda r, c=_cl, i=_im: (
+                            r[c] / r[i] * 100 if pd.notna(r[c]) and pd.notna(r[i]) and r[i] > 0 else None
+                        ),
+                        axis=1,
+                    )
+            if "ad_server_ctr" in view_gam.columns:
+                # Primary stays = lifetime CTR (already 0-100 from the earlier
+                # override). Annotation = 1d CTR rate - 2d CTR rate pp delta.
+                view_gam["ad_server_ctr"] = view_gam.apply(
+                    lambda r: _fmt_pct_annot(
+                        r.get("ad_server_ctr"),
+                        r.get("ctr_rate_1d"),
+                        r.get("ctr_rate_2d"),
+                    ),
+                    axis=1,
+                )
+
             has_vcr = "vcr" in view_gam.columns and (
                 view_gam["vcr"].notna().any()
                 or ("ad_format" in view_gam.columns and view_gam["ad_format"].str.lower().eq("video").any())
@@ -1304,7 +1327,7 @@ with tab_seller:
                 col_config["Delivered"] = st.column_config.NumberColumn(format="localized")
             if "Remaining" in table_df.columns:
                 col_config["Remaining"] = st.column_config.NumberColumn(format="localized")
-            # Impressions / Clicks / Pacing / Viewability are now annotated text
+            # Clicks / Pacing / Viewability / CTR are now annotated text
             # strings ("X (▲ +Y)"), not raw numbers.
             if "Clicks" in table_df.columns:
                 col_config["Clicks"] = st.column_config.TextColumn("Clicks", width="medium")
@@ -1315,7 +1338,7 @@ with tab_seller:
             if "VCR %" in table_df.columns:
                 col_config["VCR %"] = st.column_config.NumberColumn(format="%.1f%%")
             if "CTR %" in table_df.columns:
-                col_config["CTR %"] = st.column_config.NumberColumn(format="%.2f%%")
+                col_config["CTR %"] = st.column_config.TextColumn("CTR %", width="medium")
             if "Revenue" in table_df.columns:
                 col_config["Revenue"] = st.column_config.NumberColumn(format="dollar")
 
