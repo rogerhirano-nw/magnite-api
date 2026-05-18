@@ -8,10 +8,12 @@ Two categories:
 
 Run manually:  python weekly_report.py
 Run on a cron: GitHub Actions weekly_report.yml
+Test sender:   python weekly_report.py --test
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 from datetime import date
 from pathlib import Path
@@ -168,9 +170,39 @@ def send_email(html_body: str) -> None:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+def _sample_data() -> tuple[pd.DataFrame, pd.DataFrame]:
+    never_sent = pd.DataFrame([{
+        "deal": "Team-USA_RShore-TEST-NEVER-SENT",
+        "seller": "Rob Shore",
+        "days_in_data": 7,
+        "first_seen": "2026-05-11",
+        "total_bid_requests": 0,
+        "total_bid_responses": 0,
+    }])
+    never_accepted = pd.DataFrame([{
+        "deal": "Team-USA_ILee-TEST-NEVER-ACCEPTED",
+        "seller": "Ivy Lee",
+        "days_in_data": 14,
+        "first_seen": "2026-05-04",
+        "total_bid_requests": 4200,
+        "total_bid_responses": 0,
+    }])
+    return never_sent, never_accepted
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--test", action="store_true", help="Send a sample email without hitting the database")
+    args = parser.parse_args()
+
     _load_dotenv()
-    never_sent, never_accepted = load_never_accepted()
+
+    if args.test:
+        never_sent, never_accepted = _sample_data()
+        print("Test mode — skipping database query.")
+    else:
+        never_sent, never_accepted = load_never_accepted()
+
     print(f"Never sent: {len(never_sent)} | Never accepted: {len(never_accepted)}")
     html = build_email(never_sent, never_accepted)
     send_email(html)
