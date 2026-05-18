@@ -154,6 +154,22 @@
     "Programmatic Guaranteed Deal": "Programmatic Guaranteed",
     "Private Marketplace Deal": "Private Marketplace"
   },
+  "line_item_warnings": [
+    {
+      "match_field": "ad_format",
+      "match_substring": "Interscroller",
+      "severity": "amber",
+      "title": "Interscroller format — viewability caveat",
+      "body": "Interscroller creatives use a scroll-lock animation; viewability measurements may be artificially low compared to standard display. Compare to your display baseline before escalating."
+    },
+    {
+      "match_field": "line_item_name",
+      "match_substring": "IAS",
+      "severity": "info",
+      "title": "IAS-monitored line",
+      "body": "This line is bid-shaped by IAS suitability filtering. Lower delivery on news-adjacent inventory is expected."
+    }
+  ],
   "direct_sources": [
     {
       "name": "GAM Direct",
