@@ -129,6 +129,13 @@ _DEFAULT_SETTINGS: dict = {
         "Multi":        {"viewability_pct": 70.0, "ctr_pct": 0.30, "vcr_pct": 70.0},
         "Interstitial": {"viewability_pct": 70.0, "ctr_pct": 0.30, "vcr_pct": None},
     },
+    "pacing_target_pct": 100.0,
+    "status_colors": [
+        {"keyword": "Delivering", "color": "#2E7D32"},  # green
+        {"keyword": "Paused",     "color": "#F9A825"},  # amber
+        {"keyword": "Completed",  "color": "#5D4037"},  # brown
+    ],
+    "seller_colors": {},  # per-seller overrides; sellers absent fall back to hash
     "deal_type_codes": {
         "PA": "Private Auction", "PD": "Preferred Deal",
         "PG": "Programmatic Guaranteed", "PMP": "Private Marketplace",
@@ -1383,25 +1390,34 @@ with tab_seller:
                 hue = int(max(0.0, pct) / float(target) * 120)
                 return f"color: hsl({hue}, 70%, 38%)"
 
-            # ── Status color: green / yellow / brown ──────────────────────
+            # ── Status color: editable keyword → color map from settings.
+            #    Substring (case-insensitive); first matching rule wins.
+            _status_color_rules = _cfg.get("status_colors", []) or []
             def _status_color(v):
-                s = (v or "").strip().lower() if isinstance(v, str) else ""
-                if "deliver" in s:
-                    return "color: hsl(120, 55%, 35%)"  # green
-                if "paus" in s:
-                    return "color: hsl(45, 80%, 40%)"   # yellow/amber
-                if "complet" in s:
-                    return "color: hsl(28, 50%, 35%)"   # brown
+                if not isinstance(v, str): return ""
+                sl = v.strip().lower()
+                if not sl: return ""
+                for rule in _status_color_rules:
+                    kw  = (rule.get("keyword") or "").strip().lower()
+                    col = (rule.get("color")   or "").strip()
+                    if kw and col and kw in sl:
+                        return f"color: {col}"
                 return ""
 
-            # ── Seller color: deterministic hue per seller name ───────────
+            # ── Seller color: editable per-seller overrides, falls back to
+            #    deterministic hash-derived hue so unseen sellers still get a
+            #    stable color.
+            _seller_color_overrides = _cfg.get("seller_colors", {}) or {}
+            import hashlib as _hashlib
             def _seller_color(v):
                 if not isinstance(v, str) or not v.strip():
                     return ""
-                import hashlib
-                h = int(hashlib.md5(v.strip().encode("utf-8")).hexdigest()[:6], 16)
-                hue = h % 360
-                return f"color: hsl({hue}, 55%, 38%); font-weight: 600"
+                name = v.strip()
+                override = _seller_color_overrides.get(name)
+                if override and str(override).strip():
+                    return f"color: {str(override).strip()}; font-weight: 600"
+                h = int(_hashlib.md5(name.encode("utf-8")).hexdigest()[:6], 16)
+                return f"color: hsl({h % 360}, 55%, 38%); font-weight: 600"
 
             # Benchmarks for the rate columns (per-format). Each row reads its
             # Format and applies the matching threshold from settings.
@@ -1425,8 +1441,9 @@ with tab_seller:
             if any(c in table_df.columns for c in _BENCH_COLS):
                 styled_df = styled_df.apply(_benchmark_row_styles, axis=1)
             if "Pacing %" in table_df.columns:
+                _pacing_target = float(_cfg.get("pacing_target_pct", 100.0) or 100.0)
                 styled_df = styled_df.map(
-                    lambda v: _ramp_color(_parse_leading_pct(v), 100),
+                    lambda v, _t=_pacing_target: _ramp_color(_parse_leading_pct(v), _t),
                     subset=["Pacing %"],
                 )
             if "Status" in table_df.columns:
@@ -2422,6 +2439,73 @@ with tab_settings:
             },
         )
 
+        # ── Section 4d: Pacing Target ────────────────────────────────────────
+        st.markdown("#### Pacing Target")
+        st.caption(
+            "Pacing % cells at or above this value render solid green; below, "
+            "on a red→green gradient hitting solid green at the target."
+        )
+        _pacing_target_edit = st.number_input(
+            "Target pacing %",
+            value=float(_s.get("pacing_target_pct", 100.0)),
+            min_value=0.0,
+            step=1.0,
+            format="%.1f",
+            key="settings_pacing_target",
+        )
+
+        # ── Section 4e: Status Color Mapping ─────────────────────────────────
+        st.markdown("#### Status Color Mapping")
+        st.caption(
+            "Status text is matched against each keyword (case-insensitive substring). "
+            "First match wins. Color accepts any CSS color (hex like `#2E7D32`, named, hsl(...))."
+        )
+        _status_color_rows = _s.get("status_colors", []) or []
+        _status_color_editor = st.data_editor(
+            pd.DataFrame(_status_color_rows) if _status_color_rows
+            else pd.DataFrame(columns=["keyword", "color"]),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="settings_status_colors",
+            column_config={
+                "keyword": st.column_config.TextColumn("Keyword", required=True,
+                              help="Substring of the Status value, case-insensitive"),
+                "color":   st.column_config.TextColumn("Color", required=True,
+                              help="Hex like #2E7D32 or any CSS color"),
+            },
+        )
+
+        # ── Section 4f: Seller Color Overrides ───────────────────────────────
+        st.markdown("#### Seller Color Overrides")
+        st.caption(
+            "Optional per-seller color. Sellers not listed (or with blank color) "
+            "fall back to a deterministic hash-based hue so every name still gets "
+            "a stable color. Pre-populated with the AE names known to the seller mapping."
+        )
+        _known_ae_names = sorted(set(_s.get("ae_names", {}).values()))
+        _existing_seller_colors = _s.get("seller_colors", {}) or {}
+        _seller_color_rows = [
+            {"seller": name, "color": _existing_seller_colors.get(name, "")}
+            for name in _known_ae_names
+        ]
+        # Also surface any seller_colors entries for names that aren't in ae_names
+        for _extra in sorted(set(_existing_seller_colors.keys()) - set(_known_ae_names)):
+            _seller_color_rows.append({"seller": _extra, "color": _existing_seller_colors[_extra]})
+        _seller_color_editor = st.data_editor(
+            pd.DataFrame(_seller_color_rows) if _seller_color_rows
+            else pd.DataFrame(columns=["seller", "color"]),
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="settings_seller_colors",
+            column_config={
+                "seller": st.column_config.TextColumn("Seller", required=True),
+                "color":  st.column_config.TextColumn("Color",
+                              help="Hex like #1976D2; leave blank to use hash fallback"),
+            },
+        )
+
         # ── Section 5: GAM Deal Report Upload ────────────────────────────────
         st.divider()
         st.markdown("#### Upload GAM Deal Report")
@@ -2565,6 +2649,22 @@ with tab_settings:
                     "vcr_pct":         _bench_val(r.get("VCR %")),
                 }
 
+            _new_pacing_target = float(_pacing_target_edit) if _pacing_target_edit is not None else 100.0
+
+            _new_status_colors = []
+            for _, r in _status_color_editor.iterrows():
+                _kw  = str(r.get("keyword", "")).strip()
+                _col = str(r.get("color", "")).strip()
+                if _kw and _col:
+                    _new_status_colors.append({"keyword": _kw, "color": _col})
+
+            _new_seller_colors = {}
+            for _, r in _seller_color_editor.iterrows():
+                _name = str(r.get("seller", "")).strip()
+                _col  = str(r.get("color", "")).strip()
+                if _name and _col:
+                    _new_seller_colors[_name] = _col
+
             _new_direct = []
             for _, _row in _direct_edit.iterrows():
                 _dsrc_name = str(_row.get("Source Name", "")).strip()
@@ -2624,6 +2724,9 @@ with tab_settings:
                 "default_statuses": list(_default_statuses_edit),
                 "direct_sources": _new_direct,
                 "benchmarks_by_format": _new_benchmarks,
+                "pacing_target_pct":   _new_pacing_target,
+                "status_colors":       _new_status_colors,
+                "seller_colors":       _new_seller_colors,
             })
             st.cache_data.clear()
             st.success("Settings saved — reloading dashboard…")
