@@ -226,32 +226,47 @@ class GAMClient:
 
     def run_deals_report(self, start_date: date, end_date: date) -> pd.DataFrame:
         """
-        Pull PA / PD / PG deals from GAM via ORDER_NAME + DEAL_NAME.
+        Pull PA / PD / PG deals from GAM keyed by ORDER_NAME + DEAL_NAME.
 
-        Using ORDER_NAME instead of DEAL_ID because PA deals carry a valid DEAL_NAME
-        (e.g. Newsweek_PA_*) but their DEAL_ID is 0 in the API — filtering on non-zero
-        DEAL_ID silently drops all PA rows. DEAL_NAME alone is the authoritative key;
-        deal type is classified from the name by _parse_deal() in the dashboard.
+        Uses the programmatic / Ad Exchange metric set (IMPRESSIONS,
+        REVENUE_WITHOUT_CPD) rather than AD_SERVER_*. AD_SERVER_* counts only
+        impressions that flow through the Ad Server pipeline and excludes
+        Private Auction entirely (PA serves through Ad Exchange directly),
+        which is why earlier versions of this report returned 0 PA rows. The
+        programmatic metrics include PA, PD, and PG. eCPM is computed
+        post-hoc from impressions and revenue.
+
+        Column names downstream (gam_pmp_deals schema, dashboard code)
+        remain ad_server_impressions / ad_server_cpm_and_cpc_revenue /
+        ad_server_average_ecpm so existing consumers keep working unchanged.
         """
         df = self._run_report(
             dimensions=["DATE", "ORDER_NAME", "DEAL_NAME", "DEAL_BUYER_NAME", "INVENTORY_FORMAT_NAME", "PROGRAMMATIC_CHANNEL_NAME"],
-            metrics=["AD_SERVER_IMPRESSIONS", "AD_SERVER_REVENUE", "AD_SERVER_AVERAGE_ECPM"],
+            metrics=["IMPRESSIONS", "REVENUE_WITHOUT_CPD"],
             start_date=start_date,
             end_date=end_date,
         ).rename(columns={
             "deal_name": "programmatic_deal_name",
             "deal_buyer_name": "dsp",
             "inventory_format_name": "ad_format",
-            "ad_server_revenue": "ad_server_cpm_and_cpc_revenue",
+            "impressions": "ad_server_impressions",
+            "revenue_without_cpd": "ad_server_cpm_and_cpc_revenue",
         })
-        # Strip whitespace from all string columns so duplicates don't appear in DSP/Format filters
         for _col in df.select_dtypes(include="object").columns:
             df[_col] = df[_col].str.strip()
 
         df = df[
             df["programmatic_deal_name"].notna()
             & ~df["programmatic_deal_name"].isin(["", "(Not applicable)"])
-        ]
+        ].copy()
+
+        # Numeric metrics + eCPM (revenue per thousand impressions).
+        imp = pd.to_numeric(df["ad_server_impressions"], errors="coerce").fillna(0)
+        rev = pd.to_numeric(df["ad_server_cpm_and_cpc_revenue"], errors="coerce").fillna(0.0)
+        df["ad_server_impressions"] = imp.astype("int64")
+        df["ad_server_cpm_and_cpc_revenue"] = rev
+        df["ad_server_average_ecpm"] = ((rev / imp.where(imp > 0)) * 1000).fillna(0.0)
+
         logger.info("GAM deals report: %d rows, channels=%s",
                     len(df),
                     df["programmatic_channel_name"].value_counts().to_dict() if not df.empty else {})
