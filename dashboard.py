@@ -1203,12 +1203,10 @@ with tab_seller:
                 sign = "+" if d > 0 else ""
                 return f"{base} ({_arrow(d)} {sign}{d:,})"
 
-            def _fmt_pct_annot(primary, v1, v2, below=None):
+            def _fmt_pct_annot(primary, v1, v2):
                 """Cell value = `primary` (already 0-100 percent); annotation = pp delta of v1 vs v2."""
                 if pd.isna(primary): return ""
                 base = f"{primary:.1f}%"
-                if below is not None and primary < below:
-                    base += f" (below {int(below)}%)"
                 if pd.isna(v1) or pd.isna(v2): return base
                 d = v1 - v2
                 sign = "+" if d > 0 else ""
@@ -1232,13 +1230,13 @@ with tab_seller:
                 )
             if "ad_server_active_view_viewable_impressions_rate" in view_gam.columns:
                 # Primary stays = the 7-day mean viewability rate (already 0-100).
-                # Annotation = 1d rate - 2d rate pp delta.
+                # Annotation = 1d rate - 2d rate pp delta. Below-70 is conveyed
+                # by the column's red→green color ramp, no text qualifier needed.
                 view_gam["ad_server_active_view_viewable_impressions_rate"] = view_gam.apply(
                     lambda r: _fmt_pct_annot(
                         r.get("ad_server_active_view_viewable_impressions_rate"),
                         r.get("viewability_rate_1d"),
                         r.get("viewability_rate_2d"),
-                        below=70,
                     ),
                     axis=1,
                 )
