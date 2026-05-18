@@ -545,6 +545,7 @@ class GAMClient:
             "ad_server_active_view_measurable_impressions": "measurable_imps",
             "video_viewership_starts":    "video_starts",
             "video_viewership_completes": "video_completes",
+            "ad_server_cpm_and_cpc_revenue": "revenue",
         }
 
         def _per_day(d, suffix):
@@ -559,16 +560,16 @@ class GAMClient:
             df_d["line_item_id"] = df_d["line_item_id"].astype(str)
             return df_d
 
-        agg_1d = _per_day(latest_date, "1d")
-        agg_2d = _per_day(prior_date,  "2d")
-
         agg["line_item_id"] = agg["line_item_id"].astype(str)
         df_items["line_item_id"] = df_items["line_item_id"].astype(str)
 
         merged = df_items.merge(agg, on="line_item_id", how="left")
         merged = merged.merge(df_lifetime, on="line_item_id", how="left")
-        merged = merged.merge(agg_1d, on="line_item_id", how="left")
-        merged = merged.merge(agg_2d, on="line_item_id", how="left")
+        # Per-day breakouts for the last up-to-7 days — suffix 1d = most
+        # recent, 7d = oldest. The KPI-strip sparklines consume these.
+        _recent_dates = list(reversed(sorted_dates[-7:]))  # newest first
+        for _i, _d in enumerate(_recent_dates, start=1):
+            merged = merged.merge(_per_day(_d, f"{_i}d"), on="line_item_id", how="left")
 
         # Replace placeholders with real values from the reporting API.
         if "status_api" in merged.columns:
