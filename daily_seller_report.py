@@ -7,10 +7,15 @@ through two channels:
 
   1. Email — HTML modeled on the Tasklet "GAM Daily Campaign Report"
      format, sent via agentmail with adops on Cc.
-  2. Teams — compact Adaptive Card (headline + per-LI bullets) posted to
-     a single shared ad-ops channel (e.g. #adops-daily) via a "Post to a
-     channel when a webhook request is received" Workflow URL. Each AE's
-     card @mentions them so they get pinged; ad-ops sees every post.
+  2. Teams — two routes, pick whichever your tenant allows:
+       (a) Channel email address (default route): every Teams channel has
+           an email; we Cc it on each per-AE email and the report appears
+           as a channel post. No OAuth, no separate flow. Loses Adaptive
+           Card layout and @mentions but works without IT involvement.
+       (b) Workflow webhook + Adaptive Card: friendlier card layout and
+           @mention pings, but requires either an anonymous-triggerable
+           Power Automate flow OR an Entra ID app registration for the
+           Direct API OAuth flow (see ENTRA_* env vars below).
 
 Scope:
     - order_name LIKE 'Newsweek_Direct%'
@@ -90,6 +95,13 @@ AE_REGEX = re.compile(r"Team-(?:USA|INTL)_([A-Za-z]+)")
 ADOPS_EMAIL = os.environ.get("ADOPS_EMAIL", "adops@newsweek.com")
 DRY_RUN = os.environ.get("DRY_RUN", "1") != "0"
 DRY_RUN_TO = os.environ.get("DRY_RUN_TO", "roger.hirano@newsweek.com")
+
+# Teams *channel email address* — every Microsoft Teams channel can be assigned
+# one, and emails sent there appear as a channel post. When this is set and
+# DRY_RUN=0, each per-AE email is Cc'd to the channel so the report lands in
+# Teams without needing the webhook + OAuth machinery below. Lower fidelity
+# than the Adaptive Card (no @mentions, no card layout), but works today.
+TEAMS_CHANNEL_EMAIL = os.environ.get("TEAMS_CHANNEL_EMAIL", "")
 
 # Teams: single shared channel (e.g. #adops-daily). Each AE's card is posted
 # to this channel and @mentions the AE so they get pinged.
@@ -483,11 +495,12 @@ def send_one(ae_name: str, ae_email: str, html: str, today: date) -> None:
 
     if DRY_RUN:
         to = DRY_RUN_TO
-        cc = None
+        cc: Optional[list[str]] = None
         subject = f"[DRY RUN → {ae_name} <{ae_email}>] {subject}"
     else:
         to = ae_email
-        cc = [ADOPS_EMAIL] if ADOPS_EMAIL else None
+        cc_list = [a for a in (ADOPS_EMAIL, TEAMS_CHANNEL_EMAIL) if a]
+        cc = cc_list or None
 
     kwargs = {"to": to, "subject": subject, "html": html}
     if cc:

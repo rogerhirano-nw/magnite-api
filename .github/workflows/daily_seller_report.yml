@@ -38,6 +38,11 @@ jobs:
           AGENTMAIL_INBOX_ID:     ${{ secrets.AGENTMAIL_INBOX_ID }}
           ADOPS_EMAIL:            ${{ secrets.ADOPS_EMAIL }}
           DRY_RUN_TO:             ${{ secrets.DRY_RUN_TO }}
+          # Teams channel-email route: when set (and DRY_RUN=0), each AE's
+          # email is Cc'd to this address and appears as a channel post.
+          # No OAuth required. Lower fidelity than the Adaptive Card path
+          # below — no @mentions, plain email rendering — but works today.
+          TEAMS_CHANNEL_EMAIL:    ${{ secrets.TEAMS_CHANNEL_EMAIL }}
           # Single Teams Workflow URL for the shared #adops-daily channel.
           # Each AE's card is posted there and @mentions the AE so they get pinged.
           # TEAMS_DRY_RUN_WEBHOOK is optional — defaults to TEAMS_WEBHOOK_URL
