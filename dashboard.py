@@ -105,11 +105,19 @@ _DEFAULT_SETTINGS: dict = {
         },
     ],
     "ae_names": {
-        "AShah": "Amit Shah", "BKaretny": "Ben Karetny", "BRobinson": "Brian Robinson",
+        "AShah": "Amit Shah", "Ashah": "Amit Shah",
+        "BKaretny": "Ben Karetny", "Bkaretny": "Ben Karetny",
+        "BRobinson": "Brian Robinson",
+        "CMamboury": "Chantal Mamboury",
         "DDivack": "Dana Divack", "DVarvaro": "Danielle Varvaro",
-        "ILee": "Ivy Lee", "Ivy": "Ivy Lee", "JAmalfi": "Julie Amalfi",
-        "JGentile": "Jeremy Gentile", "KWebb": "House", "RShore": "Rob Shore",
-        "SCarroll": "Summer Carroll", "THern": "Theresa Hern", "THearn": "Theresa Hern", "House": "House",
+        "House": "House",
+        "ILee": "Ivy Lee", "Ilee": "Ivy Lee", "Ivy": "Ivy Lee",
+        "JAmalfi": "Julie Amalfi", "JGentile": "Jeremy Gentile", "JMakin": "Jeremy Makin",
+        "KWebb": "House",
+        "NAkhtar": "Nabeel Akhtar",
+        "RHirano": "Roger Hirano", "RShore": "Rob Shore",
+        "SCarroll": "Summer Carroll", "SCaroll": "Summer Carroll",
+        "THern": "Theresa Hern", "Thern": "Theresa Hern", "THearn": "Theresa Hern",
     },
     "team_names": {
         "USA": "USA", "INTL": "International",
@@ -248,6 +256,26 @@ def _load_settings() -> dict:
             patched.append({**base, **ssp})
         return {**cfg, "ssps": patched}
 
+    def _patch_ae_names(cfg: dict) -> dict:
+        """Merge settings.json's ae_names over the loaded ae_names dict.
+
+        _with_defaults already deep-merges _DEFAULT_SETTINGS.ae_names with the
+        DB-loaded ae_names, but settings.json edits (e.g. new AE aliases for
+        typo'd deal-name spellings) never reach prod because the DB load wins
+        and the file is only consulted as a last-resort fallback. This helper
+        layers settings.json on top of (defaults + DB) so file edits propagate
+        — same shape as _patch_direct_columns / _patch_ssp_defaults.
+        """
+        file_aes: dict = {}
+        if _SETTINGS_PATH.exists():
+            try:
+                with open(_SETTINGS_PATH) as _pf:
+                    file_aes = json.load(_pf).get("ae_names", {}) or {}
+            except Exception:
+                file_aes = {}
+        merged = {**cfg.get("ae_names", {}), **file_aes}
+        return {**cfg, "ae_names": merged}
+
     # Primary: database (survives redeployments on Streamlit Cloud)
     try:
         with _engine().connect() as conn:
@@ -255,14 +283,14 @@ def _load_settings() -> dict:
                 sqlalchemy.text("SELECT value FROM dashboard_settings WHERE key = 'main'")
             ).fetchone()
             if row:
-                return _patch_ssp_defaults(_patch_direct_columns(_with_defaults(json.loads(row[0]))))
+                return _patch_ae_names(_patch_ssp_defaults(_patch_direct_columns(_with_defaults(json.loads(row[0])))))
     except Exception:
         pass
     # Fallback: local file (useful for first-run and local dev)
     if _SETTINGS_PATH.exists():
         try:
             with open(_SETTINGS_PATH) as f:
-                return _patch_ssp_defaults(_with_defaults(json.load(f)))
+                return _patch_ae_names(_patch_ssp_defaults(_with_defaults(json.load(f))))
         except Exception:
             pass
     return _DEFAULT_SETTINGS
@@ -297,6 +325,20 @@ def _save_settings(data: dict) -> None:
 
 _cfg = _load_settings()
 _ssp_enabled: dict[str, bool] = {s["name"]: s.get("enabled", True) for s in _cfg["ssps"]}
+
+
+def _parse_gam_salesperson(val):
+    """Extract the short name from GAM's User.display_name.
+
+    GAM returns values like "Newsweek - Sales - Theresa Hern" or
+    "Newsweek - Sales- Jeremy Makin (jmakin@newsweek.com)" — strip the
+    "Newsweek - Sales[-] " prefix and any trailing email parenthetical.
+    Returns None for empty / non-string inputs.
+    """
+    if not isinstance(val, str) or not val.strip():
+        return None
+    m = re.search(r"-\s*([^-(]+?)\s*(?:\(|$)", val)
+    return m.group(1).strip() if m else val.strip()
 
 
 PRESETS = ["Year to date", "Month to date", "Last quarter", "Last 7 days", "Yesterday", "Custom"]
@@ -916,16 +958,9 @@ with tab_seller:
             _completions = gam_df["video_interaction_video_completions"]
             gam_df["vcr"] = (_completions / _starts * 100).where(_starts > 0)
 
-        # Extract seller — prefer GAM salesperson field, fall back to name regex
-        # GAM returns "Newsweek - Sales - Full Name (email)" — normalize to just the name.
-        def _parse_gam_salesperson(val):
-            if not isinstance(val, str) or not val.strip():
-                return None
-            m = re.search(r"-\s*([^-(]+?)\s*(?:\(|$)", val)
-            return m.group(1).strip() if m else val.strip()
-
         # Normalize salesperson in place so "Seller" shows short name regardless of
         # which column the settings point to (salesperson or seller_ae).
+        # _parse_gam_salesperson is defined at module level.
         _ae_regex = r"Team-(?:USA|INTL)_([A-Za-z]+)"
         if "salesperson" in gam_df.columns:
             gam_df["salesperson"] = gam_df["salesperson"].apply(_parse_gam_salesperson)
@@ -1172,11 +1207,12 @@ with tab_seller:
     _pmp_deal_types_available = sorted(set(
         dt for s in _cfg["ssps"] if s.get("enabled", True) for dt in s.get("deal_types", [])
     ))
-    # DSP / Format / Deal Source options come from the previous render via session_state (two-pass pattern).
+    # DSP / Format / Deal Source / Team options come from the previous render via session_state (two-pass pattern).
     _pmp_dsps_opts        = st.session_state.get("_pmp_dsps_opts", [])
     _pmp_formats_opts     = st.session_state.get("_pmp_formats_opts", [])
     _pmp_deal_sources_opts = st.session_state.get("_pmp_deal_sources_opts", [])
-    _pf1, _pf2, _pf3, _pf4, _pf5, _pf6 = st.columns([1, 1, 1, 1, 1, 0.6])
+    _pmp_teams_opts        = st.session_state.get("_pmp_teams_opts", [])
+    _pf1, _pf2, _pf3, _pf4, _pf5, _pf6, _pf7 = st.columns([1, 1, 1, 1, 1, 1, 0.6])
     with _pf1:
         sel_pmp_deal_types = st.multiselect(
             "Deal Type",
@@ -1209,11 +1245,17 @@ with tab_seller:
             key="campaigns_pmp_deal_source_filter",
         )
     with _pf6:
+        sel_pmp_teams = st.multiselect(
+            "Team",
+            _pmp_teams_opts,
+            key="campaigns_pmp_team_filter",
+        )
+    with _pf7:
         st.write("")  # align button with multiselect labels
         if st.button("Reset filters", key="pmp_reset_filters"):
             for _k in ("campaigns_pmp_deal_type_filter", "campaigns_pmp_ssp_filter",
                        "campaigns_pmp_dsp_filter", "campaigns_pmp_format_filter",
-                       "campaigns_pmp_deal_source_filter"):
+                       "campaigns_pmp_deal_source_filter", "campaigns_pmp_team_filter"):
                 st.session_state.pop(_k, None)
             st.rerun()
     st.caption("PA = Magnite · PD = Magnite or GAM · PG = GAM")
@@ -1324,17 +1366,39 @@ with tab_seller:
                 if _seller_cfg not in ("[auto]", "N/A", "", None) and _seller_cfg in _gam_raw.columns:
                     _gam_raw["seller_ae"] = _gam_raw[_seller_cfg].map(AE_NAMES)
                 else:
-                    _ae_regex = r"Team-(?:USA|INTL)_([A-Za-z]+)"
-                    _seller_from_deal = (
-                        _gam_raw["deal_name"].str.extract(_ae_regex, expand=False).map(AE_NAMES)
+                    # Policy: PD/PG/Direct rely on GAM's order.salesperson (API
+                    # is the source of truth — no deal-name regex needed). PA
+                    # delivers through Ad Exchange under a backstop order with
+                    # no AE assigned, so PA still falls back to the deal-name /
+                    # order-name regex.
+                    _api_by_order = {}
+                    try:
+                        _camp = load("gam_campaigns")
+                        if not _camp.empty and "order_name" in _camp.columns and "salesperson" in _camp.columns:
+                            _api_by_order = (
+                                _camp.dropna(subset=["salesperson"])
+                                     .drop_duplicates("order_name", keep="first")
+                                     .set_index("order_name")["salesperson"]
+                                     .to_dict()
+                            )
+                    except Exception:
+                        pass
+                    _api_seller = (
+                        _gam_raw["order_name"].map(_api_by_order).apply(_parse_gam_salesperson)
+                        if "order_name" in _gam_raw.columns else pd.Series([None] * len(_gam_raw), index=_gam_raw.index)
                     )
-                    if "order_name" in _gam_raw.columns:
-                        _seller_from_order = (
-                            _gam_raw["order_name"].str.extract(_ae_regex, expand=False).map(AE_NAMES)
-                        )
-                        _gam_raw["seller_ae"] = _seller_from_deal.fillna(_seller_from_order)
-                    else:
-                        _gam_raw["seller_ae"] = _seller_from_deal
+
+                    _ae_regex = r"Team-(?:USA|INTL)_([A-Za-z]+)"
+                    _regex_from_deal = _gam_raw["deal_name"].str.extract(_ae_regex, expand=False).map(AE_NAMES)
+                    _regex_from_order = (
+                        _gam_raw["order_name"].str.extract(_ae_regex, expand=False).map(AE_NAMES)
+                        if "order_name" in _gam_raw.columns else pd.Series([None] * len(_gam_raw), index=_gam_raw.index)
+                    )
+                    _regex_seller = _regex_from_deal.fillna(_regex_from_order)
+
+                    _is_pa = _gam_raw["deal_type_label"] == "Private Auction"
+                    # PD/PG: API → regex fallback. PA: regex only.
+                    _gam_raw["seller_ae"] = _api_seller.where(~_is_pa & _api_seller.notna(), _regex_seller)
 
                 _gam_deals = _gam_raw[_gam_raw["deal_type_label"].isin(_gam_deal_types)].copy()
                 if selected_seller != "All":
@@ -1553,10 +1617,19 @@ with tab_seller:
         _ds_fill = combined_pmp.loc[_ds_blank, "SSP"].map(_ssp_ds_defaults).replace("", None)
         combined_pmp.loc[_ds_blank, "Deal Source"] = _ds_fill
 
-    # Persist DSP / Format / Deal Source options for next render (two-pass pattern — filters are rendered above).
+    # Derive Team from the deal name (Team-USA / Team-INTL → display labels from team_names).
+    # Rows whose deal name doesn't carry the Team marker get NaN and are excluded when a Team filter is active.
+    _team_map = _cfg.get("team_names", {"USA": "USA", "INTL": "International"})
+    combined_pmp["Team"] = (
+        combined_pmp["Deal"].str.extract(r"_Team-(USA|INTL)_", expand=False).map(_team_map)
+        if "Deal" in combined_pmp.columns else None
+    )
+
+    # Persist DSP / Format / Deal Source / Team options for next render (two-pass pattern — filters are rendered above).
     st.session_state["_pmp_dsps_opts"]         = sorted(combined_pmp["DSP"].dropna().unique().tolist())
     st.session_state["_pmp_formats_opts"]      = sorted(combined_pmp["Format"].dropna().unique().tolist())
     st.session_state["_pmp_deal_sources_opts"] = sorted(combined_pmp["Deal Source"].dropna().unique().tolist()) if "Deal Source" in combined_pmp.columns else []
+    st.session_state["_pmp_teams_opts"]        = sorted(combined_pmp["Team"].dropna().unique().tolist()) if "Team" in combined_pmp.columns else []
 
     _combined_prefilter = combined_pmp.copy()
 
@@ -1568,6 +1641,8 @@ with tab_seller:
         combined_pmp = combined_pmp[combined_pmp["Format"].isin(sel_pmp_formats)]
     if sel_pmp_deal_sources and "Deal Source" in combined_pmp.columns:
         combined_pmp = combined_pmp[combined_pmp["Deal Source"].isin(sel_pmp_deal_sources)]
+    if sel_pmp_teams and "Team" in combined_pmp.columns:
+        combined_pmp = combined_pmp[combined_pmp["Team"].isin(sel_pmp_teams)]
 
     if combined_pmp.empty:
         # Give a specific reason when we can detect it.
@@ -1594,7 +1669,7 @@ with tab_seller:
         pm2.metric("Revenue", f"${combined_pmp['Revenue'].sum():,.2f}")
         pm3.metric("Avg eCPM", f"${combined_pmp['eCPM'].mean():,.2f}" if len(combined_pmp) else "—")
 
-        _pmp_col_order = ["Seller", "SSP", "Deal", "Deal Type", "Format", "DSP", "Deal Source",
+        _pmp_col_order = ["Seller", "Team", "SSP", "Deal", "Deal Type", "Format", "DSP", "Deal Source",
                           "Deal Status", "Floor CPM",
                           "Paid Impressions", "Revenue", "eCPM",
                           "Win Rate %", "Total Requests", "Bid Responses"]
