@@ -560,16 +560,21 @@ h1, .stMarkdown h1 { font-size: 22px !important; font-weight: 600; margin: 0 0 4
               gap: 8px; margin: 4px 0 10px;
               background: transparent; border: none; }
 .kpi-tile  { display: flex; flex-direction: column; justify-content: flex-start;
-             height: 88px; padding: 12px 14px;
+             height: 96px; padding: 12px 14px;
              border-radius: var(--border-radius-lg);
              background: rgba(255,255,255,0.03);
              border: 0.5px solid rgba(255,255,255,0.08);
              box-sizing: border-box; }
 .kpi-label { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
              color: rgba(250,250,250,0.50); font-weight: 500; margin-bottom: 6px; }
+.kpi-value-row { display: flex; align-items: center; gap: 8px; min-height: 22px; }
 .kpi-value { font-size: 18px; font-weight: 500; line-height: 1.2;
              color: rgba(250,250,250,0.92); font-variant-numeric: tabular-nums; }
-.kpi-target{ font-size: 11px; color: rgba(250,250,250,0.50); margin-top: 2px; }
+.kpi-spark { width: 56px; height: 20px; flex-shrink: 0; }
+.kpi-target{ font-size: 11px; color: rgba(250,250,250,0.50); margin-top: 4px; }
+.kpi-delta-up    { color: hsl(120, 50%, 65%); }
+.kpi-delta-down  { color: hsl(0, 60%, 70%); }
+.kpi-delta-amber { color: hsl(40, 60%, 65%); }
 /* Sentence-case helper class (utility — applied selectively). */
 .nw-sentence::first-letter { text-transform: uppercase; }
 /* Compact dataframe borders */
@@ -1723,15 +1728,203 @@ if st.session_state.active_view == "campaigns":
                 if abs(v) >= 1_000_000: return f"{v/1_000_000:.2f}M"
                 if abs(v) >= 1_000:     return f"{v/1_000:.1f}K"
                 return f"{int(v):,}"
-            def _kpi_tile(label, value, target=None):
+
+            # ── Sparkline helpers ─────────────────────────────────────────
+            def _sparkline_svg(values, target=None, color="green"):
+                """56x20 SVG sparkline. `values` is the 7-day series (oldest first).
+                `target` optionally draws a dashed reference line. `color` keys into
+                the green/amber/red palette."""
+                if not values:
+                    return ""
+                clean = [float(v) if (v is not None and not pd.isna(v)) else None for v in values]
+                non_null = [v for v in clean if v is not None]
+                if len(non_null) < 2:
+                    return ""
+                pool = non_null + ([float(target)] if target is not None else [])
+                vmin, vmax = min(pool), max(pool)
+                if vmax == vmin:
+                    vmax = vmin + 1
+                W, H, PAD = 56, 20, 2
+                n = len(clean)
+                def _x(i): return i / (n - 1) * W if n > 1 else W / 2
+                def _y(v): return H - PAD - (v - vmin) / (vmax - vmin) * (H - 2 * PAD)
+                pts = " ".join(f"{_x(i):.1f},{_y(v):.1f}"
+                               for i, v in enumerate(clean) if v is not None)
+                palette = {
+                    "green": "hsl(120, 50%, 65%)",
+                    "amber": "hsl(40, 60%, 65%)",
+                    "red":   "hsl(0, 60%, 70%)",
+                }
+                stroke = palette.get(color, palette["green"])
+                tline = ""
+                if target is not None:
+                    ty = _y(float(target))
+                    tline = (f'<line x1="0" y1="{ty:.1f}" x2="{W}" y2="{ty:.1f}" '
+                             f'stroke="rgba(250,250,250,0.30)" stroke-width="0.5" '
+                             f'stroke-dasharray="2 2"/>')
+                last_i = max(i for i, v in enumerate(clean) if v is not None)
+                dot = (f'<circle cx="{_x(last_i):.1f}" cy="{_y(clean[last_i]):.1f}" '
+                       f'r="2" fill="{stroke}"/>')
+                return (f'<svg class="kpi-spark" viewBox="0 0 {W} {H}" '
+                        f'xmlns="http://www.w3.org/2000/svg">{tline}'
+                        f'<polyline points="{pts}" fill="none" stroke="{stroke}" '
+                        f'stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>'
+                        f'{dot}</svg>')
+
+            def _series_sum(prefix):
+                """Sum per-day metric across LIs → [day7..day1] series.
+                Returns None when all 7 cols aren't present yet."""
+                cols = [f"{prefix}_{i}d" for i in range(7, 0, -1)]
+                if not all(c in view_gam.columns for c in cols):
+                    return None
+                out = []
+                for c in cols:
+                    s = pd.to_numeric(view_gam[c], errors="coerce")
+                    out.append(float(s.sum()) if pd.notna(s.sum()) else None)
+                return out
+
+            def _ratio_series(num_prefix, denom_prefix, scale=100.0):
+                """Ratio of two daily sums × scale → series."""
+                ns, ds = _series_sum(num_prefix), _series_sum(denom_prefix)
+                if ns is None or ds is None:
+                    return None
+                return [(n / d * scale) if (d and n is not None) else None
+                        for n, d in zip(ns, ds)]
+
+            def _pacing_series():
+                """Synthetic aggregate pacing trend: cumulative delivered (rolled
+                back from lifetime by subtracting subsequent days) divided by
+                expected cumulative (goal × elapsed-fraction at that day)."""
+                if not all(f"impressions_{i}d" in view_gam.columns for i in range(1, 8)):
+                    return None
+                if "impressions_goal" not in view_gam.columns or \
+                   "start_date" not in view_gam.columns or \
+                   "end_date" not in view_gam.columns:
+                    return None
+                today = date.today()
+                lifetime = pd.to_numeric(view_gam.get("lifetime_impressions_delivered",
+                                                      view_gam.get("ad_server_impressions")),
+                                          errors="coerce").fillna(0)
+                goal = pd.to_numeric(view_gam["impressions_goal"], errors="coerce")
+                start = pd.to_datetime(view_gam["start_date"], errors="coerce")
+                end = pd.to_datetime(view_gam["end_date"], errors="coerce")
+                total_days = (end - start).dt.days.clip(lower=1)
+                series = []
+                for n in range(7, 0, -1):  # n=7 oldest, n=1 most recent
+                    rolled = pd.Series(0.0, index=view_gam.index)
+                    for i in range(1, n):
+                        rolled = rolled + pd.to_numeric(
+                            view_gam.get(f"impressions_{i}d", 0), errors="coerce"
+                        ).fillna(0)
+                    cumulative = (lifetime - rolled).clip(lower=0)
+                    as_of = pd.Timestamp(today - timedelta(days=n))
+                    elapsed = (as_of - start).dt.days.clip(lower=0)
+                    elapsed = pd.Series(
+                        [min(e, t) for e, t in zip(elapsed, total_days)],
+                        index=view_gam.index,
+                    )
+                    expected = goal * (elapsed / total_days)
+                    mask = (goal > 0) & (expected > 0) & cumulative.notna()
+                    if not mask.any():
+                        series.append(None)
+                        continue
+                    sum_c = float(cumulative[mask].sum())
+                    sum_e = float(expected[mask].sum())
+                    series.append((sum_c / sum_e * 100) if sum_e else None)
+                return series
+
+            def _trend_delta_label(values, fmt="pct", suffix_target=None):
+                """Compare latest to 7-day average. Returns (text, class).
+                fmt: 'pct' for relative %, 'pp' for percentage-point delta."""
+                if not values:
+                    return (None, "")
+                non = [v for v in values if v is not None and not pd.isna(v)]
+                if len(non) < 2:
+                    return (None, "")
+                latest = non[-1]
+                prior_avg = sum(non[:-1]) / len(non[:-1])
+                if prior_avg == 0:
+                    return (None, "")
+                if fmt == "pct":
+                    d = (latest - prior_avg) / abs(prior_avg) * 100
+                    arrow = "▲" if d > 0 else ("▼" if d < 0 else "•")
+                    cls = "kpi-delta-up" if d > 0 else ("kpi-delta-down" if d < 0 else "")
+                    txt = f'<span class="{cls}">{arrow} {abs(d):.1f}%</span> vs 7-day avg'
+                    if abs(d) < 0.05:
+                        txt = '<span>• flat</span> vs 7-day avg'
+                    if suffix_target is not None:
+                        txt += f' · target {suffix_target}'
+                    return (txt, cls)
+                # pp
+                d = latest - prior_avg
+                arrow = "▲" if d > 0 else ("▼" if d < 0 else "•")
+                cls = "kpi-delta-up" if d > 0 else ("kpi-delta-down" if d < 0 else "")
+                txt = f'<span class="{cls}">{arrow} {abs(d):.1f}pp</span>'
+                if abs(d) < 0.05:
+                    txt = '<span>• flat</span>'
+                if suffix_target is not None:
+                    txt += f' · target {suffix_target}'
+                return (txt, cls)
+
+            def _spark_color(series, target=None, lower_is_worse=True):
+                """Pick green/amber/red for the sparkline based on latest vs target."""
+                if not series: return "green"
+                non = [v for v in series if v is not None and not pd.isna(v)]
+                if not non: return "green"
+                latest = non[-1]
+                if target is None:
+                    return "green"
+                ratio = latest / target if target else 1.0
+                if lower_is_worse:
+                    if ratio >= 1.0:  return "green"
+                    if ratio >= 0.90: return "amber"
+                    return "red"
+                else:  # higher is worse (rare)
+                    if ratio <= 1.0:  return "green"
+                    if ratio <= 1.10: return "amber"
+                    return "red"
+
+            def _kpi_tile(label, value, target=None, spark=None):
+                """Render one KPI card. `target` is the subtitle text. `spark`
+                is the pre-rendered SVG markup (or '' for text-only)."""
                 target_html = f'<div class="kpi-target">{target}</div>' if target else ""
+                spark_html = spark or ""
                 return (
                     f'<div class="kpi-tile">'
                     f'<div class="kpi-label">{label}</div>'
+                    f'<div class="kpi-value-row">'
                     f'<div class="kpi-value">{value}</div>'
+                    f'{spark_html}'
+                    f'</div>'
                     f'{target_html}'
                     f'</div>'
                 )
+
+            # ── Compute the four sparkline series. ───────────────────────
+            _rev_series  = _series_sum("revenue")
+            _ctr_series  = _ratio_series("clicks", "impressions")
+            _view_series = _ratio_series("viewable_imps", "measurable_imps")
+            _pace_series = _pacing_series()
+
+            _rev_spark = _sparkline_svg(_rev_series, color="green") if _rev_series else ""
+            _pace_spark = _sparkline_svg(
+                _pace_series, target=float(_pacing_target),
+                color=_spark_color(_pace_series, float(_pacing_target), True),
+            ) if _pace_series else ""
+            _view_target = 70.0  # from settings.benchmarks_by_format.Display.viewability_pct
+            _view_spark = _sparkline_svg(
+                _view_series, target=_view_target,
+                color=_spark_color(_view_series, _view_target, True),
+            ) if _view_series else ""
+            _ctr_spark = _sparkline_svg(_ctr_series, color="green") if _ctr_series else ""
+
+            _rev_sub  = _trend_delta_label(_rev_series, "pct")[0]
+            _pace_sub = _trend_delta_label(_pace_series, "pp", suffix_target=f"{int(_pacing_target)}%")[0] \
+                        if _pace_series else f"Target {int(_pacing_target)}%"
+            _view_sub = _trend_delta_label(_view_series, "pp", suffix_target="70%")[0] \
+                        if _view_series else "Target 70%"
+            _ctr_sub  = _trend_delta_label(_ctr_series, "pp", suffix_target="0.08%")[0] \
+                        if _ctr_series else "Benchmark 0.08%"
 
             if _video_li_count > 0 and pd.notna(avg_vcr):
                 _vcr_val = f"{avg_vcr:.1f}%"
@@ -1742,18 +1935,18 @@ if st.session_state.active_view == "campaigns":
             # Single grid container so all six tiles stretch to equal height.
             st.markdown(
                 '<div class="nw-kpi-row">'
-                + _kpi_tile("Revenue",     _fmt_money(total_rev))
+                + _kpi_tile("Revenue", _fmt_money(total_rev), _rev_sub or None, _rev_spark)
                 + _kpi_tile("Impressions", _fmt_count(total_impr))
                 + _kpi_tile("Avg pacing",
                             f"{avg_pacing:.1f}%" if pd.notna(avg_pacing) else "—",
-                            f"Target {int(_pacing_target)}%")
+                            _pace_sub, _pace_spark)
                 + _kpi_tile("Viewability",
                             f"{avg_viewability:.1f}%" if pd.notna(avg_viewability) else "—",
-                            "Target 70%")
+                            _view_sub, _view_spark)
                 + _kpi_tile("VCR", _vcr_val, _vcr_sub)
                 + _kpi_tile("CTR",
                             f"{avg_ctr:.2f}%" if pd.notna(avg_ctr) else "—",
-                            "Benchmark 0.08%")
+                            _ctr_sub, _ctr_spark)
                 + '</div>',
                 unsafe_allow_html=True,
             )
