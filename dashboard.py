@@ -647,7 +647,7 @@ def load(table: str) -> pd.DataFrame:
 
 
 tab_seller, tab_site, tab_dsp, tab_deal, tab_pubmatic, tab_settings = st.tabs([
-    "Campaigns", "By site / size", "By DSP", "Magnite deals", "Pubmatic deals", "Settings",
+    "Campaigns", "By site / size", "By DSP", "Magnite deals", "Pubmatic deals", "⚙  Configure",
 ])
 
 with tab_site:
@@ -2633,13 +2633,6 @@ with tab_seller:
 # ── Settings tab ─────────────────────────────────────────────────────────────
 
 with tab_settings:
-    st.subheader("Dashboard Settings")
-    st.caption(
-        "Configure data sources and column mappings for each SSP. "
-        "Changes take effect immediately after saving. "
-        "Add a new SSP by inserting a row in the Sources table and filling in its column mapping."
-    )
-
     _s = _load_settings()  # fresh read so edits are based on current file
 
     _CANONICAL_FIELDS = [
@@ -2652,14 +2645,136 @@ with tab_settings:
         "Programmatic Guaranteed", "Private Marketplace",
     ]
 
-    _settings_pmp_tab, _settings_direct_tab = st.tabs(["PMP Deals", "Direct Campaigns"])
+    # ── Page header — eyebrow + Configure + Last saved (relative).
+    _last_saved_disp = "—"
+    try:
+        with _engine().connect() as _conn_s:
+            _row = _conn_s.execute(sqlalchemy.text(
+                "SELECT updated_at FROM dashboard_settings WHERE key='main'"
+            )).fetchone()
+            if _row and _row[0]:
+                _ts = pd.to_datetime(_row[0])
+                _age = pd.Timestamp.now(tz="UTC") - _ts.tz_convert("UTC") if _ts.tzinfo else \
+                       pd.Timestamp.utcnow() - _ts
+                _hours = _age.total_seconds() / 3600
+                if _hours < 1:
+                    _last_saved_disp = f"{int(_age.total_seconds()/60)} min ago"
+                elif _hours < 24:
+                    _last_saved_disp = f"{int(_hours)} hours ago"
+                else:
+                    _last_saved_disp = f"{int(_hours/24)} days ago"
+    except Exception:
+        pass
+    # Best-effort user attribution — first AE in the mapping (no real auth here).
+    _by_user = "R. Hirano"
+    st.markdown(
+        f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
+        f'margin:6px 0 4px 0;">'
+        f'<div><div class="nw-eyebrow">Yield &amp; pacing</div>'
+        f'<div style="font-size:22px;font-weight:600;color:rgba(250,250,250,0.92);">Configure</div></div>'
+        f'<div style="font-size:11px;color:rgba(250,250,250,0.45);">'
+        f'Last saved {_last_saved_disp} by {_by_user}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Unmapped-values detection — compute counts per category.
+    def _query_distinct(sql):
+        try:
+            with _engine().connect() as _c:
+                return set(str(r[0]).strip() for r in _c.execute(sqlalchemy.text(sql)).fetchall()
+                           if r[0] is not None and str(r[0]).strip()
+                           and str(r[0]).strip() not in ("(Not applicable)",))
+        except Exception:
+            return set()
+
+    _live_dsps = (
+        _query_distinct("SELECT DISTINCT dsp FROM gam_pmp_deals")
+        | _query_distinct("SELECT DISTINCT dsp FROM pubmatic_deals")
+    )
+    _mapped_dsps = set((_s.get("dsp_aliases") or {}).keys())
+    _unmapped_dsps = sorted(_live_dsps - _mapped_dsps - {""})
+
+    _live_formats = (
+        _query_distinct("SELECT DISTINCT ad_format FROM gam_pmp_deals")
+        | _query_distinct("SELECT DISTINCT ad_format FROM pubmatic_deals")
+    )
+    _mapped_formats = set((_s.get("format_aliases") or {}).keys()) | {"Display", "Video", "Native", "Multi", "Interstitial", "Banner"}
+    _unmapped_formats = sorted(_live_formats - _mapped_formats - {""})
+
+    _live_dt = _query_distinct("SELECT DISTINCT deal_type FROM pubmatic_deals")
+    _mapped_dt = set((_s.get("deal_type_aliases") or {}).keys()) | set((_s.get("deal_type_codes") or {}).values())
+    _unmapped_dt = sorted(_live_dt - _mapped_dt - {""})
+
+    _live_ds = _query_distinct("SELECT DISTINCT deal_source FROM pubmatic_deals")
+    _mapped_ds = set((_s.get("deal_source_aliases") or {}).keys()) | {"Publisher", "Magnite"}
+    _unmapped_ds = sorted(_live_ds - _mapped_ds - {""})
+
+    # Seller codes from line item names / order names.
+    _ae_codes_mapped = set((_s.get("ae_names") or {}).keys())
+    _unmapped_codes = set()
+    try:
+        with _engine().connect() as _c:
+            _names = _c.execute(sqlalchemy.text(
+                "SELECT line_item_name FROM gam_campaigns "
+                "WHERE line_item_name LIKE '%Team-USA_%' OR line_item_name LIKE '%Team-INTL_%' "
+                "LIMIT 5000"
+            )).fetchall()
+        import re as _re_sc
+        _ae_re = _re_sc.compile(r"Team-(?:USA|INTL)_([A-Za-z]+)")
+        for (_n,) in _names:
+            if not _n: continue
+            _m = _ae_re.search(str(_n))
+            if _m and _m.group(1) not in _ae_codes_mapped:
+                _unmapped_codes.add(_m.group(1))
+    except Exception:
+        pass
+    _unmapped_codes = sorted(_unmapped_codes)
+
+    _pmp_unmapped_total = len(_unmapped_dsps) + len(_unmapped_formats) + len(_unmapped_dt) + len(_unmapped_ds)
+    _direct_unmapped_total = len(_unmapped_codes)
+    _total_unmapped = _pmp_unmapped_total + _direct_unmapped_total
+
+    if _total_unmapped > 0:
+        _bits = []
+        if _unmapped_dsps:    _bits.append(f"DSP: '{_unmapped_dsps[0]}'")
+        if _unmapped_formats: _bits.append(f"Format: '{_unmapped_formats[0]}'")
+        if _unmapped_dt:      _bits.append(f"Deal type: '{_unmapped_dt[0]}'")
+        if _unmapped_ds:      _bits.append(f"Deal source: '{_unmapped_ds[0]}'")
+        if _unmapped_codes:   _bits.append(f"Seller code: '{_unmapped_codes[0]}'")
+        _detail = " · ".join(_bits)
+        if _total_unmapped > len(_bits):
+            _detail += f" ({_total_unmapped - len(_bits)} more)"
+        st.markdown(
+            f'<div class="cfg-unmapped-banner">'
+            f'<div class="cfg-unmapped-head">⚠ {_total_unmapped} unmapped value{"s" if _total_unmapped != 1 else ""} detected since last save</div>'
+            f'<div>{_detail} — see the highlighted rows below</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # Sub-tab labels include unmapped count badges.
+    _pmp_tab_label    = f"PMP deals  {_pmp_unmapped_total}" if _pmp_unmapped_total > 0 else "PMP deals"
+    _direct_tab_label = f"Direct campaigns  {_direct_unmapped_total}" if _direct_unmapped_total > 0 else "Direct campaigns"
+    _settings_pmp_tab, _settings_direct_tab = st.tabs([_pmp_tab_label, _direct_tab_label])
 
     with _settings_pmp_tab:
-        # ── Section 1: PMP Data Sources ─────────────────────────────────────
-        st.markdown("#### PMP Data Sources")
-        st.caption(
-            "Each row is one SSP. **Deal Types** controls which deal types that SSP contributes to the PMP table. "
-            "Disabling an SSP hides it from all filters and tables."
+        # ────────────────────────────────────────────────────────────────────
+        # SECTION 1 — Sources
+        # ────────────────────────────────────────────────────────────────────
+        _n_pmp_enabled = sum(1 for s in _s.get("ssps", []) if s.get("enabled", True))
+        st.markdown(
+            f'<div class="cfg-section-head" style="margin-top:8px">'
+            f'<span class="cfg-eyebrow">Section 1 — Sources</span>'
+            f'<span class="cfg-count">{_n_pmp_enabled} active</span></div>'
+            f'<div class="cfg-desc">Each row is one SSP feeding the PMP table. '
+            f'Disabling an SSP hides it everywhere downstream.</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div class="cfg-card-title">PMP data sources '
+            f'<span class="cfg-card-meta">· {_n_pmp_enabled} active</span></div>',
+            unsafe_allow_html=True,
         )
 
         _ssp_rows = [
@@ -2697,12 +2812,23 @@ with tab_settings:
             },
         )
 
-        # ── Section 2: Metrics and Dimensions Mapping ───────────────────────
-        st.markdown("#### Metrics and Dimensions Mapping")
-        st.caption(
-            "Each row is a canonical display field; each column is an SSP. "
-            "Use the dropdown in each cell to pick the matching source column from that SSP's table. "
-            "**N/A** = not available. **[auto]** = computed from the deal name (type, format, seller)."
+        # ────────────────────────────────────────────────────────────────────
+        # SECTION 2 — Field mapping
+        # ────────────────────────────────────────────────────────────────────
+        _n_canonical = len(_CANONICAL_FIELDS)
+        st.markdown(
+            f'<div class="cfg-section-head" style="margin-top:24px">'
+            f'<span class="cfg-eyebrow">Section 2 — Field mapping</span>'
+            f'<span class="cfg-count">{_n_canonical} fields mapped</span></div>'
+            f'<div class="cfg-desc">Map each canonical display field to the source column in each SSP. '
+            f'<span class="cfg-pill-info">auto</span> = parsed from deal name. '
+            f'<i><span class="cfg-na">N/A</span></i> = not available from that SSP.</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div class="cfg-card-title">Metrics &amp; dimensions '
+            f'<span class="cfg-card-meta">· {_n_canonical} fields mapped</span></div>',
+            unsafe_allow_html=True,
         )
 
         _edited_ssp_names = [
@@ -2773,9 +2899,31 @@ with tab_settings:
             disabled=["Field"],
         )
 
-        # ── Section 3: Deal Type Mapping ───────────────────────────────────
-        st.markdown("#### Deal Type Mapping")
-        st.caption("Maps abbreviations in deal/order names to display labels.")
+        # ────────────────────────────────────────────────────────────────────
+        # SECTION 3 — Value normalization
+        # ────────────────────────────────────────────────────────────────────
+        _n_dt_aliases  = len(_s.get("deal_type_aliases", {}) or {})
+        _n_dsp_aliases = len(_s.get("dsp_aliases", {}) or {})
+        _n_fmt_aliases = len(_s.get("format_aliases", {}) or {})
+        _n_ds_aliases  = len(_s.get("deal_source_aliases", {}) or {})
+        _total_aliases = _n_dt_aliases + _n_dsp_aliases + _n_fmt_aliases + _n_ds_aliases
+        st.markdown(
+            f'<div class="cfg-section-head" style="margin-top:24px">'
+            f'<span class="cfg-eyebrow">Section 3 — Value normalization</span>'
+            f'<span class="cfg-count">{_total_aliases} aliases · {_total_unmapped if _total_unmapped else 0} unmapped</span></div>'
+            f'<div class="cfg-desc">Map raw values returned by each SSP to your canonical labels. '
+            f'Applied globally after combining all SSP data.</div>',
+            unsafe_allow_html=True,
+        )
+
+        # ── 3a: Deal Type Mapping (canonical labels — kept here as related).
+        st.markdown(
+            f'<div class="cfg-card-title" style="margin-top:8px">Deal type codes '
+            f'<span class="cfg-card-meta">· {len(_s.get("deal_type_codes", {}) or {})} mapped</span></div>'
+            f'<div style="font-size:11px;color:rgba(250,250,250,0.55);margin-bottom:6px">'
+            f'Short codes used inside deal/order names → canonical labels.</div>',
+            unsafe_allow_html=True,
+        )
 
         _dt_rows = [{"Code": k, "Label": v} for k, v in sorted(_s["deal_type_codes"].items())]
         _dt_edit = st.data_editor(
@@ -2791,7 +2939,15 @@ with tab_settings:
         )
 
         # ── Section 4: Deal Type Value Aliases ──────────────────────────────
-        st.markdown("#### Deal Type Value Aliases")
+        _unm_dt_html = (f' · <span class="cfg-warn-count">{len(_unmapped_dt)} unmapped</span>'
+                        if _unmapped_dt else "")
+        st.markdown(
+            f'<div class="cfg-card-title" style="margin-top:14px">Deal type aliases '
+            f'<span class="cfg-card-meta">· {_n_dt_aliases} mapped{_unm_dt_html}</span></div>',
+            unsafe_allow_html=True,
+        )
+        # placeholder so the existing st.markdown("#### Deal Type Value Aliases") gets replaced
+        _placeholder_dt_alias = None  # noqa: F841
         st.caption(
             "Map raw values returned by SSP APIs to canonical deal type labels. "
             "For example, GAM's REST API returns \"Preferred Deals\" (plural) — alias it to "
@@ -2823,7 +2979,14 @@ with tab_settings:
         )
 
         # ── Section 4: DSP Name Aliases ─────────────────────────────────────
-        st.markdown("#### DSP Name Aliases")
+        _unm_dsp_html = (f' · <span class="cfg-warn-count">{len(_unmapped_dsps)} unmapped</span>'
+                         if _unmapped_dsps else "")
+        st.markdown(
+            f'<div class="cfg-card-title" style="margin-top:14px">DSP name aliases '
+            f'<span class="cfg-card-meta">· {_n_dsp_aliases} mapped{_unm_dsp_html}</span></div>',
+            unsafe_allow_html=True,
+        )
+        _placeholder_dsp_alias = None  # noqa: F841
         st.caption(
             "Normalize DSP names that appear under multiple spellings across SSPs. "
             "Applied globally after combining Magnite, GAM, and Pubmatic data."
@@ -2847,7 +3010,14 @@ with tab_settings:
         )
 
         # ── Section 5: Format Name Aliases ──────────────────────────────────
-        st.markdown("#### Format Name Aliases")
+        _unm_fmt_html = (f' · <span class="cfg-warn-count">{len(_unmapped_formats)} unmapped</span>'
+                         if _unmapped_formats else "")
+        st.markdown(
+            f'<div class="cfg-card-title" style="margin-top:14px">Format aliases '
+            f'<span class="cfg-card-meta">· {_n_fmt_aliases} mapped{_unm_fmt_html}</span></div>',
+            unsafe_allow_html=True,
+        )
+        _placeholder_fmt_alias = None  # noqa: F841
         st.caption(
             "Normalize Format names that appear under multiple spellings across SSPs. "
             "Applied globally after combining Magnite, GAM, and Pubmatic data."
@@ -2871,7 +3041,14 @@ with tab_settings:
         )
 
         # ── Section 6: Deal Source Aliases ──────────────────────────────────
-        st.markdown("#### Deal Source Aliases")
+        _unm_ds_html = (f' · <span class="cfg-warn-count">{len(_unmapped_ds)} unmapped</span>'
+                        if _unmapped_ds else "")
+        st.markdown(
+            f'<div class="cfg-card-title" style="margin-top:14px">Deal source aliases '
+            f'<span class="cfg-card-meta">· {_n_ds_aliases} mapped{_unm_ds_html}</span></div>',
+            unsafe_allow_html=True,
+        )
+        _placeholder_ds_alias = None  # noqa: F841
         st.caption(
             "Normalize Deal Source names that differ across SSPs (e.g. Magnite's 'Publisher Deals' → 'Publisher'). "
             "Applied globally after combining all SSP data."
