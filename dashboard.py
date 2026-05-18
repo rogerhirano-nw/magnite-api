@@ -567,6 +567,109 @@ h1, .stMarkdown h1 { color: rgba(250,250,250,0.60); }
 .seller-prog { font-style: italic; color: rgba(250,250,250,0.45); }
 .cell-dash { color: rgba(250,250,250,0.30); }
 .bold-rev  { font-weight: 700; }
+/* ── Grid-based row layout + native <details> drawer ─────────────── */
+.nw-rows .nw-row-header,
+.nw-rows .nw-row > summary {
+  display: grid;
+  grid-template-columns:
+    minmax(260px, 2.4fr) 100px 100px 88px 90px 72px 72px 120px 140px;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 0.5px solid rgba(255,255,255,0.05);
+}
+.nw-row-header {
+  font-size: 10px; letter-spacing: 0.10em; text-transform: uppercase;
+  color: rgba(250,250,250,0.45); font-weight: 500;
+  border-bottom-color: rgba(255,255,255,0.08);
+}
+.nw-row-header .num { text-align: right; }
+.nw-row {
+  font-variant-numeric: tabular-nums;
+  border-bottom: 0.5px solid rgba(255,255,255,0.04);
+}
+.nw-row > summary {
+  cursor: pointer; font-size: 13px;
+  color: rgba(250,250,250,0.85); list-style: none;
+}
+.nw-row > summary::-webkit-details-marker { display: none; }
+.nw-row > summary::marker { content: ""; }
+.nw-row > summary .num { text-align: right; }
+.nw-row[open] > summary { background: rgba(255,255,255,0.025); }
+.nw-row[open] > summary .nw-chev { transform: rotate(90deg); }
+.nw-chev {
+  display: inline-block; width: 10px;
+  margin-right: 6px; color: rgba(250,250,250,0.35);
+  transition: transform 0.15s;
+}
+.nw-drawer {
+  padding: 16px 22px 18px;
+  background: rgba(255,255,255,0.04);
+  border-top: 0.5px solid rgba(255,255,255,0.05);
+  font-size: 12px;
+}
+.nw-drawer-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
+.nw-drawer-li {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px; color: rgba(250,250,250,0.85);
+  background: rgba(0,0,0,0.20); padding: 4px 8px;
+  border-radius: 4px; overflow-wrap: anywhere;
+}
+.nw-drawer-id {
+  font-size: 11px; color: rgba(250,250,250,0.55);
+  font-variant-numeric: tabular-nums;
+  user-select: all;
+}
+.nw-meta-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px 24px; margin-top: 14px;
+}
+.nw-meta-grid > div { line-height: 1.4; min-width: 0; }
+.nw-meta-grid .lbl {
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: rgba(250,250,250,0.40); display: block; margin-bottom: 2px;
+}
+.nw-meta-grid .val {
+  color: rgba(250,250,250,0.85); font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.nw-warn {
+  margin-top: 14px; padding: 10px 12px;
+  border-radius: var(--border-radius-md);
+  background: hsl(40, 45%, 18%);
+  border: 0.5px solid hsl(40, 50%, 30%);
+  color: hsl(40, 35%, 80%);
+}
+.nw-warn strong {
+  display: block; font-size: 11px;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  margin-bottom: 4px; color: hsl(40, 45%, 88%);
+}
+.nw-warn.severity-red {
+  background: hsl(0, 35%, 18%); border-color: hsl(0, 40%, 30%);
+  color: hsl(0, 30%, 82%);
+}
+.nw-warn.severity-red strong { color: hsl(0, 40%, 90%); }
+.nw-warn.severity-info {
+  background: hsl(210, 40%, 18%); border-color: hsl(210, 45%, 30%);
+  color: hsl(210, 30%, 82%);
+}
+.nw-warn.severity-info strong { color: hsl(210, 45%, 90%); }
+.nw-actions { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
+.nw-action {
+  display: inline-block; padding: 6px 14px;
+  border-radius: var(--border-radius-md);
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  color: rgba(250,250,250,0.85);
+  font-size: 11px; text-decoration: none;
+}
+.nw-action:hover { background: rgba(255,255,255,0.10); }
+.nw-action-primary {
+  background: rgba(70,130,200,0.18);
+  border-color: rgba(70,130,200,0.35);
+  color: hsl(210, 50%, 80%);
+}
 /* ── Settings sections (Direct Campaigns redesign) ───────────────── */
 .cfg-section { background: rgba(255,255,255,0.02); border-radius: var(--border-radius-lg);
                border: 0.5px solid rgba(255,255,255,0.08); padding: 16px 20px; margin: 10px 0; }
@@ -2135,6 +2238,110 @@ if st.session_state.active_view == "campaigns":
                 cls = "prog-green"
                 return f'<div class="nw-prog-bar"><div class="nw-prog-fill {cls}" style="width:{pct:.0f}%"></div></div>'
 
+            # ── Drawer helpers (data + warning matcher + URL builder).
+            _gam_network_id = os.environ.get("GAM_NETWORK_ID", "").strip()
+            _warnings_cfg = _cfg.get("line_item_warnings") or []
+
+            def _warnings_for(row):
+                out = []
+                for rule in _warnings_cfg:
+                    field = rule.get("match_field")
+                    sub = (rule.get("match_substring") or "").lower()
+                    if not field or not sub:
+                        continue
+                    val = row.get(field)
+                    if isinstance(val, str) and sub in val.lower():
+                        out.append(rule)
+                return out
+
+            def _gam_li_url(li_id):
+                if not _gam_network_id or li_id is None:
+                    return None
+                if isinstance(li_id, float) and pd.isna(li_id):
+                    return None
+                try:
+                    li_int = int(li_id)
+                except (TypeError, ValueError):
+                    return None
+                return (f"https://admanager.google.com/{_gam_network_id}"
+                        f"#delivery/LineItemDetail/lineItemId={li_int}")
+
+            def _fmt_int_cell(v):
+                v = pd.to_numeric(v, errors="coerce")
+                return "—" if pd.isna(v) else f"{int(v):,}"
+
+            def _fmt_date_cell(v):
+                if v is None or (isinstance(v, float) and pd.isna(v)):
+                    return "—"
+                s = str(v)
+                return s.split(" ")[0] if " " in s else s
+
+            def _drawer_html(row):
+                full_li = _esc(re.sub(r"^#\d+\s+", "", str(row.get("line_item_name") or "")))
+                li_id = row.get("line_item_id")
+                li_id_str = ""
+                if li_id is not None and not (isinstance(li_id, float) and pd.isna(li_id)):
+                    try:
+                        li_id_str = str(int(li_id))
+                    except (TypeError, ValueError):
+                        li_id_str = str(li_id)
+                gam_link = _gam_li_url(li_id)
+
+                cpm = row.get("cpm_rate")
+                cpm_s = "—"
+                try:
+                    if cpm is not None and not (isinstance(cpm, float) and pd.isna(cpm)):
+                        cpm_s = f"${float(cpm):g}"
+                except Exception:
+                    pass
+
+                clicks_raw = row.get("lifetime_clicks")
+                if clicks_raw is None or (isinstance(clicks_raw, float) and pd.isna(clicks_raw)):
+                    clicks_raw = row.get("ad_server_clicks")
+
+                warn_html = ""
+                for w in _warnings_for(row):
+                    sev = (w.get("severity") or "amber").lower()
+                    cls = "severity-red" if sev == "red" else ("severity-info" if sev == "info" else "")
+                    warn_html += (
+                        f'<div class="nw-warn {cls}">'
+                        f'<strong>⚠ {_esc(w.get("title") or "Warning")}</strong>'
+                        f'<div>{_esc(w.get("body") or "")}</div>'
+                        f'</div>'
+                    )
+
+                actions = ""
+                if gam_link:
+                    actions = (
+                        '<div class="nw-actions">'
+                        f'<a class="nw-action nw-action-primary" href="{gam_link}" '
+                        'target="_blank" rel="noopener">Open in GAM ↗</a>'
+                        '</div>'
+                    )
+
+                id_chip = (f'<span class="nw-drawer-id">GAM ID · {_esc(li_id_str)}</span>'
+                           if li_id_str else '')
+                return (
+                    '<div class="nw-drawer">'
+                    '<div class="nw-drawer-head">'
+                    f'<span class="nw-drawer-li">{full_li or "—"}</span>'
+                    f'{id_chip}'
+                    '</div>'
+                    f'{warn_html}'
+                    '<div class="nw-meta-grid">'
+                    f'<div><span class="lbl">Goal</span><span class="val">{_fmt_int_cell(row.get("impressions_goal"))}</span></div>'
+                    f'<div><span class="lbl">Remaining</span><span class="val">{_fmt_int_cell(row.get("remaining_impressions"))}</span></div>'
+                    f'<div><span class="lbl">Flight</span><span class="val">{_fmt_date_cell(row.get("start_date"))} → {_fmt_date_cell(row.get("end_date"))}</span></div>'
+                    f'<div><span class="lbl">Status</span><span class="val">{_esc(row.get("status") or "—")}</span></div>'
+                    f'<div><span class="lbl">Format</span><span class="val">{_esc(row.get("ad_format") or "—")}</span></div>'
+                    f'<div><span class="lbl">CPM</span><span class="val">{cpm_s}</span></div>'
+                    f'<div><span class="lbl">Clicks</span><span class="val">{_fmt_int_cell(clicks_raw)}</span></div>'
+                    f'<div><span class="lbl">Order</span><span class="val">{_esc(row.get("order_name") or "—")}</span></div>'
+                    '</div>'
+                    f'{actions}'
+                    '</div>'
+                )
+
             # ── Build the HTML table row by row.
             _rows_html = []
             # Pre-compute viewability and CTR per row from lifetime counts.
@@ -2184,18 +2391,21 @@ if st.session_state.active_view == "campaigns":
                 else:
                     _display_name = _li_clean
                 _rows_html.append(
-                    "<tr>"
-                    f'<td><div class="li-name">{_ord_html}{_esc(_display_name)}</div>'
-                    f'<div class="li-sub">{_esc(_sub) or "—"}</div></td>'
-                    f'<td class="num">{_revenue_html(_rev)}</td>'
-                    f'<td class="num">{_delivered_html(_delivered)}</td>'
-                    f'<td class="num">{_pace_html(_pace, _pace_prior)}</td>'
-                    f'<td class="num">{_viewability_html(_vw)}</td>'
-                    f'<td class="num">{f"{_ctr:.2f}%" if pd.notna(_ctr) else "<span class=cell-dash>—</span>"}</td>'
-                    f'<td class="num">{_vcr_html(_vcr_val, _is_video)}</td>'
-                    f'<td>{_seller_html}</td>'
-                    f'<td>{_progress_html(_progress)}</td>'
-                    "</tr>"
+                    '<details class="nw-row" name="cmprow">'
+                    '<summary>'
+                    f'<div><div class="li-name"><span class="nw-chev">›</span>{_ord_html}{_esc(_display_name)}</div>'
+                    f'<div class="li-sub">{_esc(_sub) or "—"}</div></div>'
+                    f'<div class="num">{_revenue_html(_rev)}</div>'
+                    f'<div class="num">{_delivered_html(_delivered)}</div>'
+                    f'<div class="num">{_pace_html(_pace, _pace_prior)}</div>'
+                    f'<div class="num">{_viewability_html(_vw)}</div>'
+                    f'<div class="num">{f"{_ctr:.2f}%" if pd.notna(_ctr) else "<span class=cell-dash>—</span>"}</div>'
+                    f'<div class="num">{_vcr_html(_vcr_val, _is_video)}</div>'
+                    f'<div>{_seller_html}</div>'
+                    f'<div>{_progress_html(_progress)}</div>'
+                    '</summary>'
+                    + _drawer_html(row) +
+                    '</details>'
                 )
 
             _table_html = (
@@ -2210,20 +2420,20 @@ if st.session_state.active_view == "campaigns":
                 '<span>— = N/A</span>'
                 '</div>'
                 '</div>'
-                '<table class="nw-tbl">'
-                '<thead><tr>'
-                '<th>Line item</th>'
-                '<th class="num">Revenue</th>'
-                '<th class="num">Delivered</th>'
-                '<th class="num">Pace</th>'
-                '<th class="num">Viewable</th>'
-                '<th class="num">CTR</th>'
-                '<th class="num">VCR</th>'
-                '<th>Seller</th>'
-                '<th>Progress</th>'
-                '</tr></thead>'
-                '<tbody>' + "".join(_rows_html) + '</tbody>'
-                '</table>'
+                '<div class="nw-rows">'
+                '<div class="nw-row-header">'
+                '<div>Line item</div>'
+                '<div class="num">Revenue</div>'
+                '<div class="num">Delivered</div>'
+                '<div class="num">Pace</div>'
+                '<div class="num">Viewable</div>'
+                '<div class="num">CTR</div>'
+                '<div class="num">VCR</div>'
+                '<div>Seller</div>'
+                '<div>Progress</div>'
+                '</div>'
+                + "".join(_rows_html) +
+                '</div>'
                 '</div>'
             )
             st.markdown(_table_html, unsafe_allow_html=True)
