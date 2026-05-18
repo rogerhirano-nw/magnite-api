@@ -983,7 +983,10 @@ with tab_seller:
             parts = name.split("_")
             return parts[idx].strip() if len(parts) > idx else None
 
-        gam_df["advertiser"]    = gam_df["line_item_name"].apply(_li_part, idx=7)
+        # Replace hyphens with spaces so the displayed Advertiser / Campaign
+        # columns read as "Ford Motor Company" / "Always On" rather than the
+        # hyphenated token form used inside the line-item-name convention.
+        gam_df["advertiser"]    = gam_df["line_item_name"].apply(_li_part, idx=7).str.replace("-", " ", regex=False)
         gam_df["campaign_name"] = gam_df["line_item_name"].apply(_li_part, idx=8).str.replace("-", " ", regex=False)
         gam_df["ad_format"]     = gam_df["line_item_name"].apply(_li_part, idx=10)
         _team_map = _cfg.get("team_names", {"USA": "USA", "INTL": "International"})
@@ -1097,11 +1100,37 @@ with tab_seller:
                     axis=1,
                 )
 
-            # CTR and viewability are stored as ratios (0–1); convert to percentage for display
-            for _ratio_col in ("ad_server_ctr", "ad_server_active_view_viewable_impressions_rate"):
-                if _ratio_col in view_gam.columns:
-                    view_gam = view_gam.copy()
-                    view_gam[_ratio_col] = view_gam[_ratio_col] * 100
+            # Override the displayed Clicks / Revenue / Viewability % / CTR %
+            # cells with lifetime values (computed from the lifetime_* columns
+            # added by run_lifetime_delivery). Previously these reflected only
+            # the most recent 7 days from the windowed delivery report, which
+            # is misleading for long-running campaigns.
+            view_gam = view_gam.copy()
+            if "lifetime_clicks" in view_gam.columns:
+                view_gam["ad_server_clicks"] = pd.to_numeric(view_gam["lifetime_clicks"], errors="coerce")
+            if "lifetime_revenue" in view_gam.columns:
+                view_gam["ad_server_cpm_and_cpc_revenue"] = pd.to_numeric(view_gam["lifetime_revenue"], errors="coerce")
+            if "lifetime_viewable_imps" in view_gam.columns and "lifetime_measurable_imps" in view_gam.columns:
+                _viewable_lt   = pd.to_numeric(view_gam["lifetime_viewable_imps"],   errors="coerce")
+                _measurable_lt = pd.to_numeric(view_gam["lifetime_measurable_imps"], errors="coerce")
+                view_gam["ad_server_active_view_viewable_impressions_rate"] = (
+                    (_viewable_lt / _measurable_lt).where(_measurable_lt > 0, other=None) * 100
+                )
+            elif "ad_server_active_view_viewable_impressions_rate" in view_gam.columns:
+                # Fallback when lifetime columns aren't populated yet (between
+                # deploy and the next refresh). API column is a 0-1 ratio.
+                view_gam["ad_server_active_view_viewable_impressions_rate"] = (
+                    pd.to_numeric(view_gam["ad_server_active_view_viewable_impressions_rate"], errors="coerce") * 100
+                )
+            if "lifetime_clicks" in view_gam.columns and "lifetime_impressions_delivered" in view_gam.columns:
+                _clicks_lt = pd.to_numeric(view_gam["lifetime_clicks"], errors="coerce")
+                _imps_lt   = pd.to_numeric(view_gam["lifetime_impressions_delivered"], errors="coerce")
+                view_gam["ad_server_ctr"] = (
+                    (_clicks_lt / _imps_lt).where(_imps_lt > 0, other=None) * 100
+                )
+            elif "ad_server_ctr" in view_gam.columns:
+                # Fallback when lifetime columns aren't populated yet.
+                view_gam["ad_server_ctr"] = pd.to_numeric(view_gam["ad_server_ctr"], errors="coerce") * 100
 
             # ── Per-LI delta annotations for impressions / clicks / pacing / viewability ──
             # Renders cells like "12,345 (▲ +500 vs prior day)" using the latest day
