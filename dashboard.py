@@ -105,11 +105,19 @@ _DEFAULT_SETTINGS: dict = {
         },
     ],
     "ae_names": {
-        "AShah": "Amit Shah", "BKaretny": "Ben Karetny", "BRobinson": "Brian Robinson",
+        "AShah": "Amit Shah", "Ashah": "Amit Shah",
+        "BKaretny": "Ben Karetny", "Bkaretny": "Ben Karetny",
+        "BRobinson": "Brian Robinson",
+        "CMamboury": "Chantal Mamboury",
         "DDivack": "Dana Divack", "DVarvaro": "Danielle Varvaro",
-        "ILee": "Ivy Lee", "Ivy": "Ivy Lee", "JAmalfi": "Julie Amalfi",
-        "JGentile": "Jeremy Gentile", "KWebb": "House", "RShore": "Rob Shore",
-        "SCarroll": "Summer Carroll", "THern": "Theresa Hern", "THearn": "Theresa Hern", "House": "House",
+        "House": "House",
+        "ILee": "Ivy Lee", "Ilee": "Ivy Lee", "Ivy": "Ivy Lee",
+        "JAmalfi": "Julie Amalfi", "JGentile": "Jeremy Gentile", "JMakin": "Jeremy Makin",
+        "KWebb": "House",
+        "NAkhtar": "Nabeel Akhtar",
+        "RHirano": "Roger Hirano", "RShore": "Rob Shore",
+        "SCarroll": "Summer Carroll", "SCaroll": "Summer Carroll",
+        "THern": "Theresa Hern", "Thern": "Theresa Hern", "THearn": "Theresa Hern",
     },
     "team_names": {
         "USA": "USA", "INTL": "International",
@@ -248,6 +256,26 @@ def _load_settings() -> dict:
             patched.append({**base, **ssp})
         return {**cfg, "ssps": patched}
 
+    def _patch_ae_names(cfg: dict) -> dict:
+        """Merge settings.json's ae_names over the loaded ae_names dict.
+
+        _with_defaults already deep-merges _DEFAULT_SETTINGS.ae_names with the
+        DB-loaded ae_names, but settings.json edits (e.g. new AE aliases for
+        typo'd deal-name spellings) never reach prod because the DB load wins
+        and the file is only consulted as a last-resort fallback. This helper
+        layers settings.json on top of (defaults + DB) so file edits propagate
+        — same shape as _patch_direct_columns / _patch_ssp_defaults.
+        """
+        file_aes: dict = {}
+        if _SETTINGS_PATH.exists():
+            try:
+                with open(_SETTINGS_PATH) as _pf:
+                    file_aes = json.load(_pf).get("ae_names", {}) or {}
+            except Exception:
+                file_aes = {}
+        merged = {**cfg.get("ae_names", {}), **file_aes}
+        return {**cfg, "ae_names": merged}
+
     # Primary: database (survives redeployments on Streamlit Cloud)
     try:
         with _engine().connect() as conn:
@@ -255,14 +283,14 @@ def _load_settings() -> dict:
                 sqlalchemy.text("SELECT value FROM dashboard_settings WHERE key = 'main'")
             ).fetchone()
             if row:
-                return _patch_ssp_defaults(_patch_direct_columns(_with_defaults(json.loads(row[0]))))
+                return _patch_ae_names(_patch_ssp_defaults(_patch_direct_columns(_with_defaults(json.loads(row[0])))))
     except Exception:
         pass
     # Fallback: local file (useful for first-run and local dev)
     if _SETTINGS_PATH.exists():
         try:
             with open(_SETTINGS_PATH) as f:
-                return _patch_ssp_defaults(_with_defaults(json.load(f)))
+                return _patch_ae_names(_patch_ssp_defaults(_with_defaults(json.load(f))))
         except Exception:
             pass
     return _DEFAULT_SETTINGS
