@@ -3229,6 +3229,18 @@ if st.session_state.active_view == "campaigns":
                 if clicks_raw is None or (isinstance(clicks_raw, float) and pd.isna(clicks_raw)):
                     clicks_raw = row.get("ad_server_clicks")
 
+                # Max creative duration from the gam_lica↔gam_creatives join.
+                # "—" → no duration could be resolved → line keeps its original
+                # ad_format for benchmark purposes (no recategorization).
+                _cdur = row.get("_creative_max_dur")
+                if _cdur is None or (isinstance(_cdur, float) and pd.isna(_cdur)):
+                    _cdur_str = "—"
+                else:
+                    try:
+                        _cdur_str = f"{float(_cdur):.0f}s"
+                    except (TypeError, ValueError):
+                        _cdur_str = "—"
+
                 warn_html = ""
                 for w in _warnings_for(row):
                     sev = (w.get("severity") or "amber").lower()
@@ -3349,6 +3361,8 @@ if st.session_state.active_view == "campaigns":
                     f'<div><span class="lbl">CPM</span><span class="val">{cpm_s}</span></div>'
                     f'<div><span class="lbl">Clicks</span><span class="val">{_fmt_int_cell(clicks_raw)}</span></div>'
                     f'<div><span class="lbl">Order</span><span class="val">{_esc(row.get("order_name") or "—")}</span></div>'
+                    f'<div><span class="lbl">Creative duration</span>'
+                    f'<span class="val">{_cdur_str}</span></div>'
                     '</div>'
                     f'{actions}'
                     '</div>'
