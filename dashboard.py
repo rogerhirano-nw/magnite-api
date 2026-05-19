@@ -124,11 +124,12 @@ _DEFAULT_SETTINGS: dict = {
         "USA": "USA", "INTL": "International",
     },
     "benchmarks_by_format": {
-        "Display":      {"viewability_pct": 70.0, "ctr_pct": 0.30, "vcr_pct": None},
-        "Video":        {"viewability_pct": 70.0, "ctr_pct": 0.30, "vcr_pct": 70.0},
-        "Native":       {"viewability_pct": 70.0, "ctr_pct": 0.30, "vcr_pct": None},
-        "Multi":        {"viewability_pct": 70.0, "ctr_pct": 0.30, "vcr_pct": 70.0},
-        "Interstitial": {"viewability_pct": 70.0, "ctr_pct": 0.30, "vcr_pct": None},
+        "Display":            {"viewability_pct": 70.0, "ctr_pct": 0.30, "vcr_pct": None},
+        "Video":              {"viewability_pct": 70.0, "ctr_pct": 0.30, "vcr_pct": 70.0},
+        "Video Preroll >30s": {"viewability_pct": 70.0, "ctr_pct": 0.30, "vcr_pct": 50.0},
+        "Native":             {"viewability_pct": 70.0, "ctr_pct": 0.30, "vcr_pct": None},
+        "Multi":              {"viewability_pct": 70.0, "ctr_pct": 0.30, "vcr_pct": 70.0},
+        "Interstitial":       {"viewability_pct": 70.0, "ctr_pct": 0.30, "vcr_pct": None},
     },
     "pacing_target_pct": 100.0,
     "gam_network_id": "",  # set in Configure → Direct campaigns → GAM integration
