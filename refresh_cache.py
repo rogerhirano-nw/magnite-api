@@ -235,6 +235,23 @@ def refresh_gam_private_auctions() -> int:
     return len(df)
 
 
+def refresh_gam_preferred_deals() -> int:
+    """Fetch non-archived PD/PG/Sponsorship proposal-line-item metadata from
+    GAM via SOAP, write to gam_pd_metadata. Used by weekly_report.py to
+    apply the ≥ 90-day age threshold on Preferred Deals."""
+    logger.info("Refreshing gam_pd_metadata (GAM Preferred Deals / Proposal Line Items)")
+    gam = GAMClient()
+    df = gam.get_preferred_deals()
+    if df.empty:
+        logger.warning("No PD metadata returned — nothing to write")
+        return 0
+    df["_pulled_at"] = datetime.now(timezone.utc).isoformat()
+    with _engine().begin() as conn:
+        df.to_sql("gam_pd_metadata", conn, if_exists="replace", index=False)
+    logger.info("Wrote %d rows to gam_pd_metadata", len(df))
+    return len(df)
+
+
 def refresh_gam_creatives() -> int:
     """Fetch creative metadata (display name + video duration) and write
     to gam_creatives. Used by the dashboard to detect lines whose creative
@@ -378,6 +395,11 @@ def main() -> None:
         total += refresh_gam_private_auctions()
     except Exception:
         logger.exception("Refresh failed for gam_pa_metadata — continuing")
+
+    try:
+        total += refresh_gam_preferred_deals()
+    except Exception:
+        logger.exception("Refresh failed for gam_pd_metadata — continuing")
 
     try:
         total += refresh_gam_creatives()
